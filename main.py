@@ -19,7 +19,7 @@ class NeatBackupGUI:
         # Main window
         self.root = tk.Tk()
         self.root.title("Neat Backup Automation v1.0")
-        self.root.geometry("700x600")
+        self.root.geometry("700x720")
         self.root.resizable(False, False)
         
         self.create_widgets()
