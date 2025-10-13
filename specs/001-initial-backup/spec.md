@@ -142,15 +142,21 @@ Automated backup system for Neat.com document libraries, enabling IT professiona
 ---
 
 ### US-006: Error Recovery
-**As a** user  
-**I want** the backup to continue even if individual files fail  
+**As a** user
+**I want** the backup to continue even if individual files fail
 **So that** I don't lose the entire backup due to one problem
 
 **Acceptance Criteria:**
-- [ ] Failed files logged with error reason
-- [ ] Process continues to next file
-- [ ] Summary shows success/failure counts
-- [ ] User can retry failed files
+- [x] Failed files logged with error reason
+- [x] Process continues to next file
+- [x] Summary shows success/failure counts
+- [x] User can retry failed files
+
+**Implementation:**
+- Failed files tracked with folder context and error details
+- "Retry Failed Files" button appears when backup completes with errors
+- Retry re-processes folders containing failed files
+- Stats updated with retry results (successful/still-failed breakdown)
 
 **Priority:** P1 (High)
 

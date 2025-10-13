@@ -152,6 +152,19 @@ class NeatBackupGUI:
             height=2
         )
         self.stop_btn.pack(side=tk.LEFT, padx=5)
+
+        self.retry_btn = tk.Button(
+            button_frame,
+            text="Retry Failed Files",
+            command=self.retry_failed_files,
+            state=tk.DISABLED,
+            bg='#FFA500',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            width=15,
+            height=2
+        )
+        self.retry_btn.pack(side=tk.LEFT, padx=5)
     
     def toggle_password(self):
         """Toggle password visibility"""
@@ -264,12 +277,18 @@ class NeatBackupGUI:
         self.progress_bar.stop()
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-        
+
         if stats.get('success'):
             successful = stats.get('successful_files', stats.get('total_files', 0))
             failed = stats.get('failed_files', 0)
             total = stats.get('total_files', 0)
             folders = stats.get('total_folders', 0)
+
+            # Enable retry button if there are failures
+            if failed > 0:
+                self.retry_btn.config(state=tk.NORMAL)
+            else:
+                self.retry_btn.config(state=tk.DISABLED)
 
             # Build message based on success/failure
             if failed > 0:
@@ -298,17 +317,64 @@ class NeatBackupGUI:
             self.progress_var.set("Backup failed - check log for details")
             messagebox.showerror("Backup Failed", "Backup process failed. Check the status log for details.")
     
+    def retry_failed_files(self):
+        """Retry previously failed files"""
+        if not self.bot or not self.bot.failed_files:
+            messagebox.showinfo("No Failed Files", "There are no failed files to retry.")
+            return
+
+        # Get credentials
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+
+        if not username or not password:
+            messagebox.showerror("Error", "Please enter username and password")
+            return
+
+        # Disable buttons
+        self.start_btn.config(state=tk.DISABLED)
+        self.retry_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+
+        # Start progress bar
+        self.progress_bar.start()
+        self.progress_var.set("Retrying failed files...")
+
+        # Log retry start
+        self.log_status(f"Starting retry for {len(self.bot.failed_files)} failed files", "info")
+
+        # Run retry in thread
+        retry_thread = threading.Thread(
+            target=self.run_retry_thread,
+            args=(username, password),
+            daemon=True
+        )
+        retry_thread.start()
+
+    def run_retry_thread(self, username: str, password: str):
+        """Run retry in background thread"""
+        try:
+            stats = self.bot.retry_failed_files(username, password)
+
+            # Show results
+            self.root.after(0, lambda: self.backup_complete(stats))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.log_status(f"Retry failed: {str(e)}", "error"))
+            self.root.after(0, self.backup_complete, {'success': False})
+
     def stop_backup(self):
         """Stop backup process"""
         if self.bot:
             self.bot.cleanup()
-        
+
         self.progress_bar.stop()
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
+        self.retry_btn.config(state=tk.DISABLED)
         self.progress_var.set("Backup stopped by user")
         self.log_status("Backup stopped by user", "warning")
-    
+
     def run(self):
         """Start the GUI application"""
         self.root.mainloop()

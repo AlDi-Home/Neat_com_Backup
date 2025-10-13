@@ -28,6 +28,7 @@ class NeatBot:
         self.status_callback = status_callback
         self.driver = None
         self.chrome_download_dir = get_chrome_download_dir()
+        self.failed_files = []  # Store failed files for retry: [(folder_name, folder_selector, file_index)]
         
     def _log(self, message: str, level: str = 'info'):
         """Log message and send to callback"""
@@ -497,6 +498,14 @@ class NeatBot:
                     self._log(f"Error exporting file: {error_msg}", "error")
                     failed_count += 1
                     errors.append(error_msg)
+                    # Store failed file info for retry
+                    self.failed_files.append({
+                        'folder_name': folder_name,
+                        'folder_selector': folder_selector,
+                        'file_index': idx,
+                        'file_title': file_title if 'file_title' in locals() else f'File {idx}',
+                        'error': str(e)
+                    })
                     continue
 
             return (exported_count, failed_count, errors)
@@ -517,12 +526,16 @@ class NeatBot:
         Returns:
             Statistics dictionary
         """
+        # Clear failed files list from any previous run
+        self.failed_files = []
+
         stats = {
             'total_folders': 0,
             'total_files': 0,
             'successful_files': 0,
             'failed_files': 0,
             'errors': [],
+            'failed_file_details': [],  # Will be populated at end
             'success': False
         }
         
@@ -543,6 +556,7 @@ class NeatBot:
                 stats['errors'].extend(folder_errors)
 
             stats['success'] = True
+            stats['failed_file_details'] = self.failed_files  # Store for retry functionality
 
             # Log completion summary
             if stats['failed_files'] > 0:
@@ -566,6 +580,94 @@ class NeatBot:
         
         return stats
     
+    def retry_failed_files(self, username: str, password: str) -> dict:
+        """
+        Retry previously failed files
+
+        Args:
+            username: Neat username
+            password: Neat password
+
+        Returns:
+            Statistics dictionary with retry results
+        """
+        if not self.failed_files:
+            self._log("No failed files to retry", "warning")
+            return {
+                'total_files': 0,
+                'successful_files': 0,
+                'failed_files': 0,
+                'errors': [],
+                'success': True
+            }
+
+        self._log(f"=== Retrying {len(self.failed_files)} failed files ===", "info")
+
+        stats = {
+            'total_files': len(self.failed_files),
+            'successful_files': 0,
+            'failed_files': 0,
+            'errors': [],
+            'failed_file_details': [],
+            'success': False
+        }
+
+        # Store copy of failed files and clear the list
+        files_to_retry = self.failed_files.copy()
+        self.failed_files = []
+
+        try:
+            self.setup_driver()
+
+            if not self.login(username, password):
+                stats['errors'].append("Login failed")
+                return stats
+
+            # Group files by folder for efficiency
+            files_by_folder = {}
+            for file_info in files_to_retry:
+                folder_key = (file_info['folder_name'], file_info['folder_selector'])
+                if folder_key not in files_by_folder:
+                    files_by_folder[folder_key] = []
+                files_by_folder[folder_key].append(file_info)
+
+            # Process each folder
+            for (folder_name, folder_selector), files in files_by_folder.items():
+                self._log(f"Retrying {len(files)} files in folder: {folder_name}")
+
+                # Re-export the entire folder
+                # This will naturally handle all files including previously failed ones
+                self._log(f"Re-exporting folder: {folder_name}")
+                success, fail, errors = self.export_folder_files(folder_name, folder_selector)
+                stats['successful_files'] += success
+                stats['failed_files'] += fail
+                stats['errors'].extend(errors)
+
+            stats['success'] = True
+            stats['failed_file_details'] = self.failed_files
+
+            if stats['failed_files'] > 0:
+                self._log(
+                    f"Retry complete! {stats['successful_files']}/{stats['total_files']} files succeeded. "
+                    f"{stats['failed_files']} still failed.",
+                    "warning"
+                )
+            else:
+                self._log(
+                    f"Retry successful! All {stats['successful_files']} files exported.",
+                    "success"
+                )
+
+        except Exception as e:
+            self._log(f"Retry failed: {str(e)}", "error")
+            stats['errors'].append(str(e))
+
+        finally:
+            if self.driver:
+                self.driver.quit()
+
+        return stats
+
     def cleanup(self):
         """Close browser and cleanup"""
         if self.driver:

@@ -9,6 +9,18 @@
 
 ## Recent Updates
 
+**2025-10-13: US-006 Retry Failed Files Implementation**
+- ✅ **U2** (Retry Failed Files UI): Fully implemented with "Retry Failed Files" button
+- **Change Summary**: Complete retry functionality allowing users to re-attempt failed file exports
+- **Implementation Details:**
+  - Added `failed_files` tracking list in NeatBot with folder context
+  - Implemented `retry_failed_files()` method that re-exports folders with failures
+  - Added orange "Retry Failed Files" button to GUI (enabled when failures occur)
+  - Retry runs in background thread with progress indication
+  - Stats updated with retry results showing success/failure breakdown
+  - Button state management: disabled during operations, enabled after failures
+- **Test Results:** Module imports successful, retry method callable, GUI button integration complete
+
 **2025-10-13: High-Priority Issue Resolution**
 - ✅ **G1** (Config Validation): Added `validate()` method to Config class with comprehensive checks
 - ✅ **U2 Foundation** (Failed Files Tracking): Implemented error tracking infrastructure for future retry functionality
