@@ -81,3 +81,50 @@ class Config:
         """Set configuration value"""
         self.settings[key] = value
         self.save_config()
+
+    def validate(self) -> tuple:
+        """
+        Validate configuration settings
+
+        Returns:
+            Tuple of (is_valid, error_messages)
+        """
+        errors = []
+
+        # Validate download_dir
+        download_dir = self.settings.get('download_dir')
+        if not download_dir:
+            errors.append("download_dir is not set")
+        else:
+            try:
+                path = Path(download_dir)
+                # Check if parent directory exists or can be created
+                if not path.exists():
+                    path.mkdir(parents=True, exist_ok=True)
+                # Check if directory is writable
+                if not os.access(str(path), os.W_OK):
+                    errors.append(f"download_dir is not writable: {download_dir}")
+            except Exception as e:
+                errors.append(f"Invalid download_dir: {str(e)}")
+
+        # Validate chrome_headless (must be boolean)
+        chrome_headless = self.settings.get('chrome_headless')
+        if chrome_headless is not None and not isinstance(chrome_headless, bool):
+            errors.append(f"chrome_headless must be boolean, got {type(chrome_headless)}")
+
+        # Validate numeric timeouts
+        numeric_settings = {
+            'wait_timeout': (1, 60),
+            'download_timeout': (5, 300),
+            'delay_between_files': (0, 10)
+        }
+
+        for key, (min_val, max_val) in numeric_settings.items():
+            value = self.settings.get(key)
+            if value is not None:
+                if not isinstance(value, (int, float)):
+                    errors.append(f"{key} must be numeric, got {type(value)}")
+                elif value < min_val or value > max_val:
+                    errors.append(f"{key} must be between {min_val} and {max_val}, got {value}")
+
+        return (len(errors) == 0, errors)

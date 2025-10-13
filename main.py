@@ -214,7 +214,14 @@ class NeatBackupGUI:
         # Update config
         self.config.set('download_dir', self.backup_dir_var.get())
         self.config.set('chrome_headless', self.headless_var.get())
-        
+
+        # Validate configuration
+        is_valid, validation_errors = self.config.validate()
+        if not is_valid:
+            error_msg = "Configuration validation failed:\n\n" + "\n".join(validation_errors)
+            messagebox.showerror("Configuration Error", error_msg)
+            return
+
         # Create backup directory
         Path(self.backup_dir_var.get()).mkdir(parents=True, exist_ok=True)
         
@@ -259,12 +266,34 @@ class NeatBackupGUI:
         self.stop_btn.config(state=tk.DISABLED)
         
         if stats.get('success'):
-            self.progress_var.set(f"Backup complete! {stats['total_files']} files from {stats['total_folders']} folders")
-            messagebox.showinfo(
-                "Backup Complete",
-                f"Successfully exported {stats['total_files']} files from {stats['total_folders']} folders!\n\n"
-                f"Location: {self.backup_dir_var.get()}"
-            )
+            successful = stats.get('successful_files', stats.get('total_files', 0))
+            failed = stats.get('failed_files', 0)
+            total = stats.get('total_files', 0)
+            folders = stats.get('total_folders', 0)
+
+            # Build message based on success/failure
+            if failed > 0:
+                self.progress_var.set(f"Backup complete with errors: {successful}/{total} files succeeded")
+                error_details = "\n\nFailed files:\n" + "\n".join(stats.get('errors', [])[:5])
+                if len(stats.get('errors', [])) > 5:
+                    error_details += f"\n... and {len(stats['errors']) - 5} more errors"
+
+                messagebox.showwarning(
+                    "Backup Complete with Errors",
+                    f"Backup completed with some failures.\n\n"
+                    f"Successfully exported: {successful}/{total} files\n"
+                    f"Failed: {failed} files\n"
+                    f"Folders processed: {folders}\n"
+                    f"Location: {self.backup_dir_var.get()}"
+                    f"{error_details}"
+                )
+            else:
+                self.progress_var.set(f"Backup complete! {successful} files from {folders} folders")
+                messagebox.showinfo(
+                    "Backup Complete",
+                    f"Successfully exported {successful} files from {folders} folders!\n\n"
+                    f"Location: {self.backup_dir_var.get()}"
+                )
         else:
             self.progress_var.set("Backup failed - check log for details")
             messagebox.showerror("Backup Failed", "Backup process failed. Check the status log for details.")

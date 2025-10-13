@@ -254,18 +254,20 @@ class NeatBot:
             self._log(f"Error getting folders: {str(e)}", "error")
             return []
     
-    def export_folder_files(self, folder_name: str, folder_selector: str) -> int:
+    def export_folder_files(self, folder_name: str, folder_selector: str) -> tuple:
         """
         Export all files from a folder
-        
+
         Args:
             folder_name: Display name of folder
             folder_selector: CSS selector for folder
-        
+
         Returns:
-            Number of files exported
+            Tuple of (successful_count, failed_count, error_list)
         """
         exported_count = 0
+        failed_count = 0
+        errors = []
         safe_folder_name = sanitize_folder_name(folder_name)
         
         try:
@@ -491,14 +493,18 @@ class NeatBot:
                     time.sleep(0.5)
                     
                 except Exception as e:
-                    self._log(f"Error exporting file: {str(e)}", "error")
+                    error_msg = f"{file_title if 'file_title' in locals() else f'File {idx}'}: {str(e)}"
+                    self._log(f"Error exporting file: {error_msg}", "error")
+                    failed_count += 1
+                    errors.append(error_msg)
                     continue
-            
-            return exported_count
-            
+
+            return (exported_count, failed_count, errors)
+
         except Exception as e:
-            self._log(f"Error processing folder {folder_name}: {str(e)}", "error")
-            return exported_count
+            error_msg = f"Folder {folder_name}: {str(e)}"
+            self._log(f"Error processing folder: {error_msg}", "error")
+            return (exported_count, failed_count, errors)
     
     def run_backup(self, username: str, password: str) -> dict:
         """
@@ -514,6 +520,9 @@ class NeatBot:
         stats = {
             'total_folders': 0,
             'total_files': 0,
+            'successful_files': 0,
+            'failed_files': 0,
+            'errors': [],
             'success': False
         }
         
@@ -525,13 +534,28 @@ class NeatBot:
             
             folders = self.get_folders()
             stats['total_folders'] = len(folders)
-            
+
             for folder_name, folder_selector in folders:
-                count = self.export_folder_files(folder_name, folder_selector)
-                stats['total_files'] += count
-            
+                success_count, fail_count, folder_errors = self.export_folder_files(folder_name, folder_selector)
+                stats['successful_files'] += success_count
+                stats['failed_files'] += fail_count
+                stats['total_files'] += (success_count + fail_count)
+                stats['errors'].extend(folder_errors)
+
             stats['success'] = True
-            self._log(f"Backup complete! Exported {stats['total_files']} files from {stats['total_folders']} folders", "success")
+
+            # Log completion summary
+            if stats['failed_files'] > 0:
+                self._log(
+                    f"Backup complete with errors! Successfully exported {stats['successful_files']}/{stats['total_files']} files "
+                    f"from {stats['total_folders']} folders. {stats['failed_files']} files failed.",
+                    "warning"
+                )
+            else:
+                self._log(
+                    f"Backup complete! Successfully exported {stats['successful_files']} files from {stats['total_folders']} folders",
+                    "success"
+                )
             
         except Exception as e:
             self._log(f"Backup failed: {str(e)}", "error")

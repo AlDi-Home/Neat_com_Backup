@@ -9,6 +9,18 @@
 
 ## Recent Updates
 
+**2025-10-13: High-Priority Issue Resolution**
+- ✅ **G1** (Config Validation): Added `validate()` method to Config class with comprehensive checks
+- ✅ **U2 Foundation** (Failed Files Tracking): Implemented error tracking infrastructure for future retry functionality
+- ✅ **A1/A2** (Performance Criteria): Updated spec.md with concrete, measurable performance and reliability criteria
+- **Change Summary**: Enhanced error handling and reporting system, added config validation, specified concrete acceptance criteria for performance and reliability requirements.
+- **Implementation Details:**
+  - Config validation: Validates download_dir writability, boolean types, numeric ranges
+  - Error tracking: Stats now include `successful_files`, `failed_files`, and `errors` list
+  - Completion summary: GUI displays success/failure counts with error details
+  - Performance criteria: Defined 90% threshold (25s/file), 95% success rate target, 30s timeout
+  - Reliability criteria: Specified 3 retry attempts, error logging requirements
+
 **2025-10-13: File Organization Implementation**
 - ✅ **T022** (Implement organize_file): Completed and tested
 - ✅ **T026** (Implement export_folder_files core loop): Updated to include file organization

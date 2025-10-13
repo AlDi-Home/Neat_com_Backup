@@ -263,14 +263,22 @@ Automated backup system for Neat.com document libraries, enabling IT professiona
 ## Non-Functional Requirements
 
 ### NFR-001: Performance
-- Target: 10-20 seconds per file
-- Support: 500-1,250 files (2-4 hours total)
-- Optimization: Headless mode for 15% improvement
+**Measurable Criteria:**
+- **Target:** 10-20 seconds per file average
+- **Threshold:** SHOULD complete 90% of files within 25 seconds each
+- **Capacity:** MUST support 500-1,250 files (2-4 hours total runtime)
+- **Optimization:** Headless mode SHOULD provide 10-15% speed improvement
+- **Monitoring:** System logs average file processing time for performance review
+- **Timeout:** Individual file downloads MUST timeout after 30 seconds (configurable)
 
 ### NFR-002: Reliability
-- Uptime: Handle network interruptions gracefully
-- Recovery: Continue after individual file failures
-- Data Integrity: Verify downloads before organizing
+**Measurable Criteria:**
+- **Network Interruptions:** MUST continue backup after transient network failures (max 3 retry attempts with 1-second delay)
+- **Recovery:** MUST continue processing after individual file failures (not abort entire backup)
+- **Data Integrity:** MUST verify download completion (wait for .crdownload removal) before file organization
+- **Success Rate:** Target 95%+ successful file exports under normal conditions
+- **Error Logging:** MUST log all failed files with specific error messages
+- **Error Reporting:** MUST provide summary of failed files (count + details) at backup completion
 
 ### NFR-003: Security
 - Encryption: Fernet symmetric (AES-128)
