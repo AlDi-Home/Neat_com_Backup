@@ -485,14 +485,15 @@ class NeatBot:
             except Exception as e:
                 self._log(f"Could not disable virtual scrolling: {e}", "warning")
 
-            # Scroll to load all lazy-loaded checkboxes
-            self._log("Scrolling to load all file checkboxes...")
+            # Use click-based loading strategy (discovered via debug)
+            # Clicking on checkboxes triggers virtual scroller to load more items
+            self._log("Using click-based loading to trigger virtual scroller...")
             last_checkbox_count = 0
-            scroll_attempts = 0
-            max_scroll_attempts = 20  # Increased attempts
+            load_attempts = 0
+            max_load_attempts = 10
             no_change_count = 0
 
-            while scroll_attempts < max_scroll_attempts:
+            while load_attempts < max_load_attempts:
                 # Get current checkboxes
                 checkboxes = self.driver.find_elements(
                     By.CSS_SELECTOR,
@@ -507,41 +508,38 @@ class NeatBot:
 
                 if current_count == last_checkbox_count:
                     no_change_count += 1
-                    # If no change for 3 consecutive attempts, we're done
-                    if no_change_count >= 3:
-                        self._log(f"No new checkboxes after {no_change_count} attempts, stopping scroll")
+                    # If no change for 2 consecutive attempts, we're done
+                    if no_change_count >= 2:
+                        self._log(f"No new checkboxes after {no_change_count} attempts, stopping")
                         break
                 else:
                     no_change_count = 0
                     self._log(f"Loaded {current_count} checkboxes so far...")
 
-                # Scroll down incrementally to trigger lazy loading
-                # Try multiple scrolling approaches
-                self.driver.execute_script("window.scrollBy(0, 800);")
-                time.sleep(1)
-
-                # Scroll the file list container itself
-                try:
-                    file_grid = self.driver.find_element(By.CSS_SELECTOR, '[role="grid"]')
-                    self.driver.execute_script("arguments[0].scrollTop = arguments[0].scrollHeight;", file_grid)
-                    time.sleep(1)
-                except:
-                    pass
-
-                # Also try scrolling to the last checkbox
                 if len(checkboxes) > 0:
                     try:
-                        last_checkbox = checkboxes[-1]
-                        self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'end'});", last_checkbox)
+                        # Strategy: Click FIRST checkbox to trigger loading
+                        # Based on debug data: first click triggered +4 checkboxes
+                        first_checkbox = checkboxes[0]
+
+                        # Ensure it's visible
+                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_checkbox)
+                        time.sleep(0.3)
+
+                        # Click it (triggers virtual scroller)
+                        self.driver.execute_script("arguments[0].click();", first_checkbox)
+                        time.sleep(2)  # Give time for load
+
+                        # Unclick it (clean state)
+                        self.driver.execute_script("arguments[0].click();", first_checkbox)
                         time.sleep(1)
-                        # Scroll past it
-                        self.driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'start'});", last_checkbox)
-                        time.sleep(1)
-                    except:
-                        pass
+
+                        self._log(f"Clicked first checkbox to trigger loading...")
+                    except Exception as e:
+                        self._log(f"Could not click checkbox: {e}", "warning")
 
                 last_checkbox_count = current_count
-                scroll_attempts += 1
+                load_attempts += 1
 
             # Get final checkbox count
             checkboxes = self.driver.find_elements(
