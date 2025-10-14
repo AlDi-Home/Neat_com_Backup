@@ -85,23 +85,85 @@ class NeatBot:
             
             # Otherwise, login
             self._log("Entering credentials...")
-            
+
             # Find and fill username
             username_field = self.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type="email"], input[name="username"], input[id*="user"]'))
             )
             username_field.send_keys(username)
-            
+
             # Find and fill password
             password_field = self.driver.find_element(By.CSS_SELECTOR, 'input[type="password"]')
             password_field.send_keys(password)
-            
-            # Submit
-            login_button = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-            login_button.click()
-            
-            # Wait for dashboard
-            self.wait.until(lambda d: "files/folders" in d.current_url)
+
+            # Check for CAPTCHA before submitting
+            time.sleep(2)
+
+            # Look for common CAPTCHA elements
+            captcha_detected = False
+            captcha_selectors = [
+                'iframe[src*="recaptcha"]',
+                'iframe[src*="hcaptcha"]',
+                '[class*="captcha"]',
+                '#captcha',
+                '[data-testid*="captcha"]'
+            ]
+
+            for selector in captcha_selectors:
+                try:
+                    captcha_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if captcha_elem.is_displayed():
+                        captcha_detected = True
+                        break
+                except:
+                    continue
+
+            if captcha_detected:
+                self._log("⚠️  CAPTCHA detected! Please solve the CAPTCHA manually in the browser window.", "warning")
+                self._log("Waiting up to 60 seconds for CAPTCHA to be solved...", "warning")
+
+                # Wait for CAPTCHA to be solved (either URL changes or CAPTCHA disappears)
+                wait_start = time.time()
+                captcha_solved = False
+
+                while (time.time() - wait_start) < 60:
+                    if "files/folders" in self.driver.current_url:
+                        captcha_solved = True
+                        self._log("✓ CAPTCHA appears to be solved (redirected to dashboard)", "success")
+                        break
+
+                    # Check if login button is still visible and CAPTCHA is gone
+                    try:
+                        captcha_still_present = False
+                        for selector in captcha_selectors:
+                            try:
+                                captcha_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                                if captcha_elem.is_displayed():
+                                    captcha_still_present = True
+                                    break
+                            except:
+                                continue
+
+                        if not captcha_still_present:
+                            self._log("✓ CAPTCHA solved, proceeding with login", "success")
+                            captcha_solved = True
+                            break
+                    except:
+                        pass
+
+                    time.sleep(2)
+
+                if not captcha_solved:
+                    self._log("CAPTCHA solving timeout. Please try again.", "error")
+                    return False
+
+            # Submit (if not already on dashboard from CAPTCHA flow)
+            if "files/folders" not in self.driver.current_url:
+                login_button = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                login_button.click()
+
+                # Wait for dashboard
+                self.wait.until(lambda d: "files/folders" in d.current_url)
             
             self._log("Login successful!", "success")
             return True
