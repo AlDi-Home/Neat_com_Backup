@@ -9,6 +9,21 @@
 
 ## Recent Updates
 
+**2025-10-13: CAPTCHA Handling & Pagination Investigation**
+- ✅ **CAPTCHA Detection**: Implemented automatic CAPTCHA detection and manual solving flow
+- ⚠️ **Pagination Limitation**: Identified virtual scrolling issue limiting folders to 12 visible files
+- **CAPTCHA Implementation:**
+  * Detects reCAPTCHA, hCAPTCHA, and generic CAPTCHA elements
+  * Pauses automation for up to 60 seconds for manual solving
+  * Automatically resumes when CAPTCHA solved
+  * User-friendly warning messages
+- **Pagination Status:**
+  * Successfully sets pagination to 100 items ✅
+  * Detects total file count correctly ✅
+  * Virtual scrolling only renders ~12 items at a time ❌
+  * Workaround: Run backup multiple times for folders with >12 files
+- **Documentation:** Created KNOWN_ISSUES.md with workarounds
+
 **2025-10-13: US-006 Retry Failed Files Implementation**
 - ✅ **U2** (Retry Failed Files UI): Fully implemented with "Retry Failed Files" button
 - **Change Summary**: Complete retry functionality allowing users to re-attempt failed file exports
