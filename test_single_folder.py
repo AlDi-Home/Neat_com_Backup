@@ -104,14 +104,17 @@ def test_single_folder_backup(folder_name=None):
         # Export files from this folder
         print(f"Step 4: Backing up folder '{folder_path}'...")
         print("-" * 60)
-        count = bot.export_folder_files(folder_path, folder_selector)
+        exported_count, failed_count, errors = bot.export_folder_files(folder_path, folder_selector)
         print("-" * 60)
         print()
 
         # Display results
-        if count > 0:
+        total_count = exported_count + failed_count
+        if exported_count > 0:
             print("=" * 60)
-            print(f"✓ SUCCESS! Backed up {count} files from '{folder_path}'")
+            print(f"✓ SUCCESS! Backed up {exported_count} files from '{folder_path}'")
+            if failed_count > 0:
+                print(f"⚠ WARNING: {failed_count} files failed")
             print("=" * 60)
             print()
 

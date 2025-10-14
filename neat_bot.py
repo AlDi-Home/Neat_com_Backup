@@ -10,6 +10,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 from utils import wait_for_download, organize_file, sanitize_folder_name, get_chrome_download_dir
 
@@ -518,23 +519,27 @@ class NeatBot:
 
                 if len(checkboxes) > 0:
                     try:
-                        # Strategy: Click FIRST checkbox to trigger loading
+                        # Strategy: Use ActionChains for realistic mouse clicks
                         # Based on debug data: first click triggered +4 checkboxes
+                        # ActionChains simulates real mouse movements vs JavaScript clicks
                         first_checkbox = checkboxes[0]
 
                         # Ensure it's visible
                         self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_checkbox)
                         time.sleep(0.3)
 
-                        # Click it (triggers virtual scroller)
-                        self.driver.execute_script("arguments[0].click();", first_checkbox)
+                        # Use ActionChains for realistic mouse interaction
+                        actions = ActionChains(self.driver)
+
+                        # Move to element and click (triggers virtual scroller)
+                        actions.move_to_element(first_checkbox).click().perform()
+                        self._log(f"Clicked first checkbox with ActionChains...")
                         time.sleep(2)  # Give time for load
 
                         # Unclick it (clean state)
-                        self.driver.execute_script("arguments[0].click();", first_checkbox)
+                        actions.move_to_element(first_checkbox).click().perform()
                         time.sleep(1)
 
-                        self._log(f"Clicked first checkbox to trigger loading...")
                     except Exception as e:
                         self._log(f"Could not click checkbox: {e}", "warning")
 
