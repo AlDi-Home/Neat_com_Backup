@@ -39,10 +39,23 @@ For folders with many files:
 ### Option 3: Reduce Files Per Folder
 Organize files in Neat.com into smaller folders (<12 files each) before backup.
 
-**Status:** Under investigation. Potential solutions being explored:
-- More aggressive virtual scroller manipulation
-- JavaScript injection to force full render
-- Alternative pagination navigation strategies
+**Status:** ⚠️ CONFIRMED LIMITATION (Tested 2025-10-14)
+
+**Attempted Solutions:**
+1. ✅ Set pagination to 100 items (verified working)
+2. ✅ Aggressive scrolling (window, grid container, checkbox-based)
+3. ❌ JavaScript height/overflow manipulation (tested, ineffective)
+4. ❌ CSS override attempts (DOM manipulation doesn't force render)
+
+**Root Cause:** Neat.com uses a sophisticated virtual scroller (likely React Window or similar) that maintains a virtualized list state in JavaScript. Simply manipulating CSS properties doesn't trigger the re-render needed to load all items into the DOM.
+
+**Test Results (2013 year TAX folder, 23 files):**
+- ✅ Pagination set to 100: Confirmed
+- ✅ Total files detected: 23
+- ❌ Checkboxes rendered: Only 12
+- ❌ JavaScript CSS override: No effect
+
+**Recommendation:** Use Option 1 (Multiple Backup Runs) as primary strategy.
 
 ---
 
