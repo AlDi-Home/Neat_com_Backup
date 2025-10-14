@@ -435,11 +435,48 @@ class NeatBot:
                 self._log(f"Could not read total file count: {str(e)}", "warning")
                 expected_total = None
 
+            # Try JavaScript approach to disable virtual scrolling
+            self._log("Attempting to disable virtual scrolling...")
+            try:
+                disable_virtual_js = """
+                const grid = document.querySelector('[role="grid"]');
+                if (grid) {
+                    // Find scroll container
+                    let scrollContainer = grid;
+                    let parent = grid.parentElement;
+                    while (parent && !parent.style.overflow && !parent.style.overflowY) {
+                        scrollContainer = parent;
+                        parent = parent.parentElement;
+                    }
+
+                    // Try to disable virtual scrolling by forcing full height
+                    if (scrollContainer) {
+                        scrollContainer.style.height = 'auto';
+                        scrollContainer.style.maxHeight = '100000px';
+                        scrollContainer.style.overflow = 'visible';
+                    }
+
+                    // Also try on grid itself
+                    grid.style.height = 'auto';
+                    grid.style.maxHeight = '100000px';
+
+                    return true;
+                }
+                return false;
+                """
+
+                disabled = self.driver.execute_script(disable_virtual_js)
+                if disabled:
+                    self._log("✓ Attempted to disable virtual scrolling")
+                    time.sleep(3)  # Give time for re-render
+            except Exception as e:
+                self._log(f"Could not disable virtual scrolling: {e}", "warning")
+
             # Scroll to load all lazy-loaded checkboxes
             self._log("Scrolling to load all file checkboxes...")
             last_checkbox_count = 0
             scroll_attempts = 0
-            max_scroll_attempts = 15
+            max_scroll_attempts = 20  # Increased attempts
             no_change_count = 0
 
             while scroll_attempts < max_scroll_attempts:
