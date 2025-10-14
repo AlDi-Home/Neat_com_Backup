@@ -158,12 +158,25 @@ class NeatBot:
                     return False
 
             # Submit (if not already on dashboard from CAPTCHA flow)
-            if "files/folders" not in self.driver.current_url:
-                login_button = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-                login_button.click()
+            # Wait a moment for any redirect to complete
+            time.sleep(2)
 
-                # Wait for dashboard
-                self.wait.until(lambda d: "files/folders" in d.current_url)
+            if "files/folders" not in self.driver.current_url:
+                try:
+                    login_button = self.driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+                    login_button.click()
+
+                    # Wait for dashboard
+                    self.wait.until(lambda d: "files/folders" in d.current_url)
+                except Exception as e:
+                    # Check if we're already on dashboard (CAPTCHA might have auto-submitted)
+                    time.sleep(2)
+                    if "files/folders" in self.driver.current_url:
+                        self._log("Already on dashboard after CAPTCHA", "success")
+                    else:
+                        raise e
+            else:
+                self._log("Already on dashboard, skipping login button", "success")
             
             self._log("Login successful!", "success")
             return True
