@@ -1,6 +1,7 @@
 """
 Core Selenium automation for Neat.com backup
 """
+import json
 import time
 from pathlib import Path
 from typing import List, Callable, Optional
@@ -38,9 +39,9 @@ class NeatBot:
             self.status_callback(message, level)
     
     def setup_driver(self):
-        """Initialize Chrome WebDriver with download settings"""
+        """Initialize Chrome WebDriver with download settings and network monitoring"""
         chrome_options = Options()
-        
+
         # Download settings
         prefs = {
             "download.default_directory": self.chrome_download_dir,
@@ -49,17 +50,25 @@ class NeatBot:
             "safebrowsing.enabled": True
         }
         chrome_options.add_experimental_option("prefs", prefs)
-        
+
+        # Enable performance logging for network monitoring (CDP)
+        chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
+
         # Headless mode option
         if self.config.get('chrome_headless', False):
             chrome_options.add_argument('--headless=new')
-        
+
         # Initialize driver
         service = Service(ChromeDriverManager().install())
         self.driver = webdriver.Chrome(service=service, options=chrome_options)
         self.wait = WebDriverWait(self.driver, self.config.get('wait_timeout', 10))
-        
-        self._log("Chrome WebDriver initialized")
+
+        # Enable CDP Network domain for response interception
+        try:
+            self.driver.execute_cdp_cmd('Network.enable', {})
+            self._log("Chrome WebDriver initialized with network monitoring")
+        except Exception as e:
+            self._log(f"Chrome WebDriver initialized (network monitoring unavailable: {e})", "warning")
     
     def login(self, username: str, password: str) -> bool:
         """
@@ -181,11 +190,107 @@ class NeatBot:
             
             self._log("Login successful!", "success")
             return True
-            
+
         except Exception as e:
             self._log(f"Login failed: {str(e)}", "error")
             return False
-    
+
+    def _intercept_api_response(self, folder_name: str, max_wait: int = 10) -> list:
+        """
+        Intercept the /api/v5/entities API response to get all files in folder
+
+        This method monitors network traffic and extracts the API response
+        containing all files, bypassing the virtual scrolling limitation.
+
+        Args:
+            folder_name: Name of folder for logging
+            max_wait: Maximum seconds to wait for API response
+
+        Returns:
+            List of entity dictionaries with file data, or empty list if failed
+        """
+        import time as time_module
+
+        self._log(f"Monitoring network for API response...")
+
+        start_time = time_module.time()
+        checked_request_ids = set()
+        all_responses = []  # Collect all responses to find the largest one
+
+        while (time_module.time() - start_time) < max_wait:
+            try:
+                # Get performance logs (gets ALL logs, not just new ones)
+                logs = self.driver.get_log('performance')
+
+                self._log(f"Got {len(logs)} performance log entries...")
+
+                # Look for /api/v5/entities responses
+                for log in logs:
+                    try:
+                        message = json.loads(log['message'])
+                        method = message['message']['method']
+
+                        # Check for response received
+                        if method == 'Network.responseReceived':
+                            params = message['message']['params']
+                            response = params['response']
+                            url = response['url']
+
+                            # Check if this is the entities endpoint
+                            if '/api/v5/entities' in url and response['status'] == 200:
+                                request_id = params['requestId']
+
+                                # Skip if we've already tried this request ID
+                                if request_id in checked_request_ids:
+                                    continue
+
+                                checked_request_ids.add(request_id)
+
+                                self._log(f"Found API response (request ID: {request_id[:20]}...), extracting body...")
+
+                                # Get the response body
+                                try:
+                                    response_body = self.driver.execute_cdp_cmd(
+                                        'Network.getResponseBody',
+                                        {'requestId': request_id}
+                                    )
+
+                                    body_text = response_body.get('body')
+                                    if body_text:
+                                        data = json.loads(body_text)
+
+                                        if 'entities' in data:
+                                            entities = data['entities']
+
+                                            if len(entities) > 0:
+                                                self._log(f"Found response with {len(entities)} entities")
+                                                all_responses.append(entities)
+                                            else:
+                                                self._log(f"API response had 0 entities, skipping...")
+
+                                except Exception as e:
+                                    self._log(f"Could not get response body: {e}", "warning")
+                                    continue
+
+                    except Exception as e:
+                        continue
+
+            except Exception as e:
+                self._log(f"Error reading logs: {e}", "warning")
+
+            # Small delay before next check
+            time_module.sleep(1)
+
+        # Return the response with the MOST entities (main content area, not sidebar)
+        if all_responses:
+            largest_response = max(all_responses, key=len)
+            self._log(f"✓ Intercepted API response: {len(largest_response)} files (largest of {len(all_responses)} responses)", "success")
+            return largest_response
+
+        self._log(f"Timeout waiting for API response after {max_wait}s", "warning")
+        self._log(f"Checked {len(checked_request_ids)} request IDs", "warning")
+        return []
+
     def _expand_folder_if_needed(self, folder_element):
         """
         Expand a folder if it has subfolders (has chevron button)
@@ -330,10 +435,13 @@ class NeatBot:
         except Exception as e:
             self._log(f"Error getting folders: {str(e)}", "error")
             return []
-    
+
     def export_folder_files(self, folder_name: str, folder_selector: str) -> tuple:
         """
-        Export all files from a folder
+        Export all files from a folder using API interception
+
+        Instead of scraping the DOM and fighting virtual scrolling,
+        this method intercepts the browser's own API call to get ALL files.
 
         Args:
             folder_name: Display name of folder
@@ -346,235 +454,115 @@ class NeatBot:
         failed_count = 0
         errors = []
         safe_folder_name = sanitize_folder_name(folder_name)
-        expected_total = None
-        page_number = 1
 
         try:
-            # Click folder
+            # Step 1: Click folder to open it (triggers API call)
             self._log(f"Opening folder: {folder_name}")
             folder_elem = self.driver.find_element(By.CSS_SELECTOR, folder_selector)
 
-            # Scroll element into view and click
+            # Scroll into view
             self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", folder_elem)
             time.sleep(0.5)
+
+            # Click folder
             self.driver.execute_script("arguments[0].click();", folder_elem)
-            time.sleep(3)  # Wait for files to load
+            self._log(f"✓ Clicked folder, waiting for page to load...")
+            time.sleep(6)  # Give page time to fully load and make all API calls
 
-            # IMPORTANT: Set Items per page to 100
-            self._log("Setting Items per page to 100...")
-            try:
-                # Find pagination button
-                self._log("Looking for pagination button...")
-                pagination_btn = self.wait.until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="pagination-pagecount"]'))
-                )
-                self._log(f"Found pagination button with text: {pagination_btn.text}")
+            # Step 2: Intercept API response to get ALL files
+            # We want the LARGEST response (main content), not sidebar responses
+            entities = self._intercept_api_response(folder_name, max_wait=5)
 
-                # Check current value
-                current_value = pagination_btn.text.strip()
+            if not entities:
+                self._log(f"⚠️  No files found via API interception", "warning")
+                self._log(f"Falling back to UI scraping...", "warning")
+                # Could fallback to old method here if needed
+                return (0, 0, ["API interception failed"])
 
-                if current_value != "100":
-                    self._log(f"Current pagination: {current_value}, changing to 100")
-                    # Scroll pagination button into view and use JavaScript click to avoid interception
-                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", pagination_btn)
-                    time.sleep(0.5)
-                    self.driver.execute_script("arguments[0].click();", pagination_btn)
-                    time.sleep(1)
+            total_files = len(entities)
+            self._log(f"🎯 Got {total_files} files from API (bypassed virtual scrolling!)", "success")
 
-                    # Click 100 option in dropdown - try multiple selectors
-                    option_clicked = False
-                    option_selectors = [
-                        "//li[text()='100']",
-                        "//button[text()='100']",
-                        "//div[text()='100']",
-                        "//*[@role='option' and text()='100']",
-                        "//*[text()='100' and not(contains(@class, 'nui-button'))]"
-                    ]
+            # Step 2.5: Pre-scroll to load ALL checkboxes into DOM before processing
+            self._log(f"Pre-scrolling to load all {total_files} items into DOM...")
+            max_loaded = 0
+            scroll_attempts = 0
+            max_scroll_attempts = 20
 
-                    for selector in option_selectors:
-                        try:
-                            option_100 = self.driver.find_element(By.XPATH, selector)
-                            # Use JavaScript click to avoid interception
-                            self.driver.execute_script("arguments[0].click();", option_100)
-                            option_clicked = True
-                            self._log(f"✓ Clicked 100 option using selector: {selector}")
-                            break
-                        except Exception as e:
-                            continue
-
-                    if not option_clicked:
-                        self._log("Could not click 100 option, trying fallback", "warning")
-                        # Fallback: find all elements with text "100" and click the last visible one
-                        elements = self.driver.find_elements(By.XPATH, "//*[text()='100']")
-                        for elem in reversed(elements):
-                            try:
-                                if elem.is_displayed():
-                                    self.driver.execute_script("arguments[0].click();", elem)
-                                    option_clicked = True
-                                    self._log("✓ Clicked 100 option (fallback)")
-                                    break
-                            except:
-                                continue
-
-                    time.sleep(4)  # Wait for page to reload with 100 items
-
-                    if option_clicked:
-                        self._log("✓ Set Items to 100")
-                        # Verify it actually changed
-                        time.sleep(1)
-                        pagination_btn_verify = self.driver.find_element(By.CSS_SELECTOR, '[data-testid="pagination-pagecount"]')
-                        new_value = pagination_btn_verify.text.strip()
-                        self._log(f"Verified pagination is now: {new_value}")
-                    else:
-                        self._log("⚠ Could not set Items to 100", "warning")
-                else:
-                    self._log("✓ Items already set to 100")
-
-            except Exception as e:
-                self._log(f"Could not set Items to 100: {str(e)}", "warning")
-                self._log("Continuing with default pagination...", "warning")
-
-            # Check total file count from header
-            try:
-                subtitle_elem = self.driver.find_element(By.CSS_SELECTOR, '[data-testid="gridheader-subtitle"]')
-                subtitle_text = subtitle_elem.text  # e.g., "Showing 23 items"
-                import re
-                match = re.search(r'Showing (\d+) items?', subtitle_text)
-                if match:
-                    expected_total = int(match.group(1))
-                    self._log(f"Folder contains {expected_total} total files")
-                else:
-                    expected_total = None
-            except Exception as e:
-                self._log(f"Could not read total file count: {str(e)}", "warning")
-                expected_total = None
-
-            # Try JavaScript approach to disable virtual scrolling
-            self._log("Attempting to disable virtual scrolling...")
-            try:
-                disable_virtual_js = """
-                const grid = document.querySelector('[role="grid"]');
-                if (grid) {
-                    // Find scroll container
-                    let scrollContainer = grid;
-                    let parent = grid.parentElement;
-                    while (parent && !parent.style.overflow && !parent.style.overflowY) {
-                        scrollContainer = parent;
-                        parent = parent.parentElement;
-                    }
-
-                    // Try to disable virtual scrolling by forcing full height
-                    if (scrollContainer) {
-                        scrollContainer.style.height = 'auto';
-                        scrollContainer.style.maxHeight = '100000px';
-                        scrollContainer.style.overflow = 'visible';
-                    }
-
-                    // Also try on grid itself
-                    grid.style.height = 'auto';
-                    grid.style.maxHeight = '100000px';
-
-                    return true;
-                }
-                return false;
-                """
-
-                disabled = self.driver.execute_script(disable_virtual_js)
-                if disabled:
-                    self._log("✓ Attempted to disable virtual scrolling")
-                    time.sleep(3)  # Give time for re-render
-            except Exception as e:
-                self._log(f"Could not disable virtual scrolling: {e}", "warning")
-
-            # Use click-based loading strategy (discovered via debug)
-            # Clicking on checkboxes triggers virtual scroller to load more items
-            self._log("Using click-based loading to trigger virtual scroller...")
-            last_checkbox_count = 0
-            load_attempts = 0
-            max_load_attempts = 10
-            no_change_count = 0
-
-            while load_attempts < max_load_attempts:
-                # Get current checkboxes
+            while scroll_attempts < max_scroll_attempts:
                 checkboxes = self.driver.find_elements(
                     By.CSS_SELECTOR,
                     'input[id^="checkbox-"]:not(#header-checkbox)'
                 )
                 current_count = len(checkboxes)
 
-                # If count matches expected, we're done
-                if expected_total and current_count >= expected_total:
-                    self._log(f"✓ Loaded all {current_count} checkboxes")
+                if current_count >= total_files:
+                    self._log(f"✓ All {total_files} checkboxes loaded in DOM!", "success")
                     break
 
-                if current_count == last_checkbox_count:
-                    no_change_count += 1
-                    # If no change for 2 consecutive attempts, we're done
-                    if no_change_count >= 2:
-                        self._log(f"No new checkboxes after {no_change_count} attempts, stopping")
-                        break
-                else:
-                    no_change_count = 0
-                    self._log(f"Loaded {current_count} checkboxes so far...")
+                if current_count > max_loaded:
+                    max_loaded = current_count
+                    self._log(f"Loaded {current_count}/{total_files} checkboxes...")
 
-                if len(checkboxes) > 0:
-                    try:
-                        # Strategy: Use ActionChains for realistic mouse clicks
-                        # Based on debug data: first click triggered +4 checkboxes
-                        # ActionChains simulates real mouse movements vs JavaScript clicks
-                        first_checkbox = checkboxes[0]
+                # Scroll down to trigger loading more items
+                self.driver.execute_script("window.scrollBy(0, 300);")
+                time.sleep(0.5)
+                scroll_attempts += 1
 
-                        # Ensure it's visible
-                        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", first_checkbox)
-                        time.sleep(0.3)
+            if max_loaded < total_files:
+                self._log(f"⚠️  Only loaded {max_loaded}/{total_files} checkboxes after scrolling", "warning")
+                self._log(f"Will process available files only", "warning")
 
-                        # Use ActionChains for realistic mouse interaction
-                        actions = ActionChains(self.driver)
+            # Scroll back to top
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
 
-                        # Move to element and click (triggers virtual scroller)
-                        actions.move_to_element(first_checkbox).click().perform()
-                        self._log(f"Clicked first checkbox with ActionChains...")
-                        time.sleep(2)  # Give time for load
-
-                        # Unclick it (clean state)
-                        actions.move_to_element(first_checkbox).click().perform()
-                        time.sleep(1)
-
-                    except Exception as e:
-                        self._log(f"Could not click checkbox: {e}", "warning")
-
-                last_checkbox_count = current_count
-                load_attempts += 1
-
-            # Get final checkbox count
-            checkboxes = self.driver.find_elements(
-                By.CSS_SELECTOR,
-                'input[id^="checkbox-"]:not(#header-checkbox)'
-            )
-
-            total_files = len(checkboxes)
-            self._log(f"Found {total_files} total checkboxes")
-
-            # If we're still missing files, we might need to process multiple pages
-            if expected_total and total_files < expected_total:
-                self._log(f"⚠️  Only found {total_files}/{expected_total} files on first page", "warning")
-                self._log("Note: Will process available files. You may need to run backup multiple times for all files.", "warning")
-
-            for idx, checkbox in enumerate(checkboxes, 1):
+            # Step 3: Process each file
+            for idx, entity in enumerate(entities, 1):
                 try:
-                    self._log(f"Processing file {idx}/{total_files} in {folder_name}")
-                    
-                    # Get file title for naming
-                    file_row = checkbox.find_element(By.XPATH, './ancestor::div[@role="row"]')
-                    title_elem = file_row.find_element(By.CSS_SELECTOR, '.nui-text.nui-type-body--small')
-                    file_title = title_elem.get_attribute('title') or title_elem.text
-                    
-                    # Click checkbox
+                    webid = entity.get('webid')
+                    name = entity.get('name', 'Unknown')
+                    description = entity.get('description', '')
+                    file_title = f"{name} - {description}" if description else name
+
+                    self._log(f"Processing file {idx}/{total_files}: {name}")
+
+                    # Find the checkbox for this file by index
+                    # Progressive scrolling to load more items in virtual scroll
+                    checkbox = None
+                    max_scroll_attempts = 10
+
+                    for scroll_attempt in range(max_scroll_attempts):
+                        checkboxes = self.driver.find_elements(
+                            By.CSS_SELECTOR,
+                            'input[id^="checkbox-"]:not(#header-checkbox)'
+                        )
+
+                        if idx <= len(checkboxes):
+                            checkbox = checkboxes[idx - 1]
+                            break
+
+                        # Need to scroll to load more items
+                        if scroll_attempt == 0:
+                            self._log(f"Need to scroll to find file {idx} (currently {len(checkboxes)} checkboxes loaded)")
+
+                        # Scroll down progressively
+                        self.driver.execute_script("window.scrollBy(0, 500);")
+                        time.sleep(0.5)
+
+                    if not checkbox:
+                        self._log(f"Could not find checkbox for file {idx} after {max_scroll_attempts} scroll attempts", "warning")
+                        failed_count += 1
+                        errors.append(f"{file_title}: Checkbox not found")
+                        continue
+
+                    # Click checkbox to select
+                    self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", checkbox)
+                    time.sleep(0.3)
                     self.driver.execute_script("arguments[0].click();", checkbox)
                     time.sleep(0.5)
                     self._log(f"✓ Selected file checkbox")
 
-                    # Step 3: Click Export button
+                    # Click Export button
                     self._log(f"Looking for Export button...")
                     export_btn = self.wait.until(
                         EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="export-button"]'))
@@ -584,78 +572,36 @@ class NeatBot:
                     time.sleep(1)
                     self._log(f"✓ Clicked Export button")
 
-                    # Step 4: Click "Image as PDF" option
-                    # Try multiple selectors for the PDF export option
+                    # Click 'Image as PDF' option
                     self._log(f"Looking for 'Image as PDF' option...")
-                    pdf_clicked = False
-                    pdf_selectors = [
-                        "//button[contains(text(), 'Image as PDF')]",
-                        "//li[contains(text(), 'Image as PDF')]",
-                        "//*[contains(text(), 'Image as PDF')]",
-                        "//button[contains(text(), 'PDF')]",
-                        "//li[contains(text(), 'PDF')]"
-                    ]
-
-                    for selector in pdf_selectors:
-                        try:
-                            pdf_option = self.driver.find_element(By.XPATH, selector)
-                            pdf_option.click()
-                            pdf_clicked = True
-                            self._log(f"✓ Clicked 'Image as PDF' option")
-                            break
-                        except:
-                            continue
-
-                    if not pdf_clicked:
-                        self._log("Could not find PDF export option", "error")
-                        raise Exception("PDF export option not found")
-
-                    time.sleep(2)  # Wait for modal/window to appear
-
-                    # Step 5: Click "Download PDF File" in the new window/modal
-                    self._log(f"Looking for 'Download PDF File' button in modal...")
-                    download_btn = self.wait.until(
-                        EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Download PDF File')]"))
+                    pdf_option = self.wait.until(
+                        EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'Image as PDF')]"))
                     )
-                    self._log(f"✓ Found 'Download PDF File' button, clicking...")
-                    download_btn.click()
-                    self._log(f"✓ Clicked 'Download PDF File'")
+                    self._log(f"✓ Found PDF option, clicking...")
+                    pdf_option.click()
+                    time.sleep(2)
+                    self._log(f"✓ Clicked PDF export option")
 
-                    # Step 6: IMMEDIATELY close the modal (don't wait for download)
-                    time.sleep(0.3)  # Brief pause for click to register
+                    # Click 'Download PDF File' link to actually start the download
+                    self._log(f"Looking for 'Download PDF File' link...")
+                    try:
+                        download_link = self.wait.until(
+                            EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), 'Download PDF File')]"))
+                        )
+                        self._log(f"✓ Found download link, clicking...")
+                        download_link.click()
+                        time.sleep(1)
+                        self._log(f"✓ Clicked download link")
+                    except Exception as e:
+                        self._log(f"No 'Download PDF File' link found (maybe direct download?): {e}", "warning")
 
-                    close_selectors = [
-                        "//button[contains(@aria-label, 'Close')]",
-                        "//button[contains(@title, 'Close')]",
-                        "//*[@data-testid='close-button']",
-                        "//button[contains(@class, 'close')]",
-                        "//button[contains(text(), 'Close')]"
-                    ]
-
-                    close_clicked = False
-                    for selector in close_selectors:
-                        try:
-                            close_btn = self.driver.find_element(By.XPATH, selector)
-                            if close_btn.is_displayed():
-                                close_btn.click()
-                                self._log("✓ Closed download modal")
-                                close_clicked = True
-                                break
-                        except:
-                            continue
-
-                    if not close_clicked:
-                        self._log("Could not find close button", "warning")
-
-                    time.sleep(0.3)
-
-                    # Step 7: Wait for download to complete and organize file
+                    # Wait for download to complete and organize file
                     self._log(f"Waiting for download to complete...")
                     download_dir = get_chrome_download_dir()
                     backup_root = self.config.get('download_dir')
 
-                    # Wait for download to start and get the newest file
-                    time.sleep(2)  # Give download a moment to start
+                    # Wait for download to start
+                    time.sleep(2)
 
                     # Find the most recently downloaded file
                     download_path = Path(download_dir)
@@ -681,234 +627,79 @@ class NeatBot:
                             final_path = organize_file(str(newest_file), safe_folder_name, backup_root)
 
                             if final_path:
-                                self._log(f"✓ Saved: {Path(final_path).name}")
+                                self._log(f"✓ Saved: {Path(final_path).name}", "success")
                                 exported_count += 1
                             else:
                                 self._log(f"✗ Failed to organize file", "error")
+                                failed_count += 1
+                                errors.append(f"{file_title}: Failed to organize")
                         else:
                             self._log(f"✗ Download file not found", "error")
+                            failed_count += 1
+                            errors.append(f"{file_title}: Download not found")
                     else:
                         self._log(f"✗ No PDF files found in downloads", "error")
+                        failed_count += 1
+                        errors.append(f"{file_title}: No PDF in downloads")
 
-                    # Step 8: Uncheck checkbox
+                    # Uncheck checkbox
                     self.driver.execute_script("arguments[0].click();", checkbox)
+
+                    # Close any open modal/overlay to prepare for next file
+                    try:
+                        # Try to find and click close button
+                        close_buttons = self.driver.find_elements(
+                            By.CSS_SELECTOR,
+                            'button[aria-label="Close"], button.nui-modal-close, button.nui-dialog-close'
+                        )
+                        for btn in close_buttons:
+                            if btn.is_displayed():
+                                btn.click()
+                                time.sleep(0.3)
+                                break
+                        else:
+                            # Fallback: press ESC key to close modal
+                            from selenium.webdriver.common.keys import Keys
+                            from selenium.webdriver.common.action_chains import ActionChains
+                            ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+                            time.sleep(0.3)
+                    except Exception as e:
+                        # If no modal to close, that's fine
+                        pass
+
                     self._log(f"✓ Completed file {idx}/{total_files}")
 
                     # Brief delay before next file
                     time.sleep(0.5)
-                    
+
                 except Exception as e:
-                    error_msg = f"{file_title if 'file_title' in locals() else f'File {idx}'}: {str(e)}"
+                    error_msg = f"{file_title}: {str(e)}"
                     self._log(f"Error exporting file: {error_msg}", "error")
                     failed_count += 1
                     errors.append(error_msg)
-                    # Store failed file info for retry
-                    self.failed_files.append({
-                        'folder_name': folder_name,
-                        'folder_selector': folder_selector,
-                        'file_index': idx,
-                        'file_title': file_title if 'file_title' in locals() else f'File {idx}',
-                        'error': str(e)
-                    })
-                    continue
 
-            # Check if there are more pages - continue in loop
-            while expected_total and (exported_count + failed_count) < expected_total:
-                self._log(f"Processed {exported_count + failed_count}/{expected_total} files so far. Looking for next page...")
-
-                # Try multiple selectors for next button
-                next_button_selectors = [
-                    '[data-testid="pagination-nextpage"]',
-                    '[aria-label="Go to next page"]',
-                    'button[aria-label*="next" i]',
-                    '.pagination button:last-child:not(:disabled)'
-                ]
-
-                next_clicked = False
-                for selector in next_button_selectors:
+                    # Try to uncheck any selected checkbox
                     try:
-                        next_buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        for btn in next_buttons:
-                            if btn.is_displayed() and btn.is_enabled():
-                                self._log(f"Found next button with selector: {selector}")
-                                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                                time.sleep(0.5)
-                                self.driver.execute_script("arguments[0].click();", btn)
-                                time.sleep(3)
-                                next_clicked = True
-                                page_number += 1
-                                break
-                        if next_clicked:
-                            break
-                    except Exception as e:
-                        continue
-
-                if not next_clicked:
-                    self._log(f"Could not find next page button. Processed {exported_count + failed_count}/{expected_total} files total.", "warning")
-                    break
-
-                # Process files on this new page
-                self._log(f"Processing page {page_number}...")
-
-                # Get checkboxes on new page
-                new_checkboxes = self.driver.find_elements(
-                    By.CSS_SELECTOR,
-                    'input[id^="checkbox-"]:not(#header-checkbox)'
-                )
-
-                new_files_count = len(new_checkboxes)
-                self._log(f"Found {new_files_count} files on page {page_number}")
-
-                # Process each file on this page (copy of main loop)
-                for idx, checkbox in enumerate(new_checkboxes, 1):
-                    try:
-                        self._log(f"Processing file {idx}/{new_files_count} (page {page_number})")
-
-                        # Get file title
-                        file_row = checkbox.find_element(By.XPATH, './ancestor::div[@role="row"]')
-                        title_elem = file_row.find_element(By.CSS_SELECTOR, '.nui-text.nui-type-body--small')
-                        file_title = title_elem.get_attribute('title') or title_elem.text
-
-                        # Click checkbox
-                        self.driver.execute_script("arguments[0].click();", checkbox)
-                        time.sleep(0.5)
-                        self._log(f"✓ Selected file checkbox")
-
-                        # Step 3: Click Export button
-                        self._log(f"Looking for Export button...")
-                        export_btn = self.wait.until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, '[data-testid="export-button"]'))
+                        checked_boxes = self.driver.find_elements(
+                            By.CSS_SELECTOR,
+                            'input[id^="checkbox-"]:checked:not(#header-checkbox)'
                         )
-                        self._log(f"✓ Found Export button, clicking...")
-                        export_btn.click()
-                        time.sleep(1)
-                        self._log(f"✓ Clicked Export button")
+                        for cb in checked_boxes:
+                            self.driver.execute_script("arguments[0].click();", cb)
+                    except:
+                        pass
 
-                        # Step 4: Click "Image as PDF" option
-                        self._log(f"Looking for 'Image as PDF' option...")
-                        pdf_clicked = False
-                        pdf_selectors = [
-                            "//button[contains(text(), 'Image as PDF')]",
-                            "//li[contains(text(), 'Image as PDF')]",
-                            "//*[contains(text(), 'Image as PDF')]",
-                            "//button[contains(text(), 'PDF')]",
-                            "//li[contains(text(), 'PDF')]"
-                        ]
+                    # Brief delay before continuing
+                    time.sleep(1)
 
-                        for selector in pdf_selectors:
-                            try:
-                                pdf_option = self.driver.find_element(By.XPATH, selector)
-                                pdf_option.click()
-                                pdf_clicked = True
-                                self._log(f"✓ Clicked 'Image as PDF' option")
-                                break
-                            except:
-                                continue
-
-                        if not pdf_clicked:
-                            self._log("Could not find PDF export option", "error")
-                            raise Exception("PDF export option not found")
-
-                        time.sleep(2)
-
-                        # Step 5: Click "Download PDF File"
-                        self._log(f"Looking for 'Download PDF File' button in modal...")
-                        download_btn = self.wait.until(
-                            EC.element_to_be_clickable((By.XPATH, "//*[contains(text(), 'Download PDF File')]"))
-                        )
-                        self._log(f"✓ Found 'Download PDF File' button, clicking...")
-                        download_btn.click()
-                        self._log(f"✓ Clicked 'Download PDF File'")
-
-                        # Step 6: Close modal
-                        time.sleep(0.3)
-                        close_selectors = [
-                            "//button[contains(@aria-label, 'Close')]",
-                            "//button[contains(@title, 'Close')]",
-                            "//*[@data-testid='close-button']",
-                            "//button[contains(@class, 'close')]",
-                            "//button[contains(text(), 'Close')]"
-                        ]
-
-                        close_clicked = False
-                        for selector in close_selectors:
-                            try:
-                                close_btn = self.driver.find_element(By.XPATH, selector)
-                                if close_btn.is_displayed():
-                                    close_btn.click()
-                                    self._log("✓ Closed download modal")
-                                    close_clicked = True
-                                    break
-                            except:
-                                continue
-
-                        if not close_clicked:
-                            self._log("Could not find close button", "warning")
-
-                        time.sleep(0.3)
-
-                        # Step 7: Wait for download and organize
-                        self._log(f"Waiting for download to complete...")
-                        download_dir = get_chrome_download_dir()
-                        backup_root = self.config.get('download_dir')
-
-                        time.sleep(2)
-
-                        download_path = Path(download_dir)
-                        pdf_files = list(download_path.glob('*.pdf'))
-
-                        if pdf_files:
-                            newest_file = max(pdf_files, key=lambda p: p.stat().st_mtime)
-
-                            crdownload = Path(str(newest_file) + '.crdownload')
-                            wait_timeout = 30
-                            wait_start = time.time()
-
-                            while crdownload.exists() and (time.time() - wait_start) < wait_timeout:
-                                time.sleep(0.5)
-
-                            time.sleep(1)
-
-                            if newest_file.exists():
-                                final_path = organize_file(str(newest_file), safe_folder_name, backup_root)
-
-                                if final_path:
-                                    self._log(f"✓ Saved: {Path(final_path).name}")
-                                    exported_count += 1
-                                else:
-                                    self._log(f"✗ Failed to organize file", "error")
-                            else:
-                                self._log(f"✗ Download file not found", "error")
-                        else:
-                            self._log(f"✗ No PDF files found in downloads", "error")
-
-                        # Step 8: Uncheck checkbox
-                        self.driver.execute_script("arguments[0].click();", checkbox)
-                        self._log(f"✓ Completed file {idx}/{new_files_count} (page {page_number})")
-
-                        time.sleep(0.5)
-
-                    except Exception as e:
-                        error_msg = f"{file_title if 'file_title' in locals() else f'File {idx}'}: {str(e)}"
-                        self._log(f"Error exporting file: {error_msg}", "error")
-                        failed_count += 1
-                        errors.append(error_msg)
-                        self.failed_files.append({
-                            'folder_name': folder_name,
-                            'folder_selector': folder_selector,
-                            'file_index': idx,
-                            'file_title': file_title if 'file_title' in locals() else f'File {idx}',
-                            'error': str(e)
-                        })
-                        continue
-
+            self._log(f"Completed folder: {exported_count} exported, {failed_count} failed", "success" if failed_count == 0 else "warning")
             return (exported_count, failed_count, errors)
 
         except Exception as e:
             error_msg = f"Folder {folder_name}: {str(e)}"
             self._log(f"Error processing folder: {error_msg}", "error")
             return (exported_count, failed_count, errors)
-    
+
     def run_backup(self, username: str, password: str) -> dict:
         """
         Run complete backup process
