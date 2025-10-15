@@ -483,10 +483,45 @@ class NeatBot:
             self._log(f"🎯 Got {total_files} files from API (bypassed virtual scrolling!)", "success")
 
             # Step 2.5: Pre-scroll to load ALL checkboxes into DOM before processing
+            # Use REAL mouse wheel scrolling to trigger virtual scroll properly
             self._log(f"Pre-scrolling to load all {total_files} items into DOM...")
+            from selenium.webdriver.common.action_chains import ActionChains
+            from selenium.webdriver.common.keys import Keys
+
             max_loaded = 0
             scroll_attempts = 0
-            max_scroll_attempts = 20
+            max_scroll_attempts = 30
+
+            # Find the scrollable container (the file list area)
+            # Try multiple selectors to find the actual scrollable element
+            file_list_container = None
+            selectors = [
+                '[data-testid="file-list"]',
+                '[role="list"]',
+                '.file-list',
+                '.files-container',
+                '[class*="FileList"]',
+                '[class*="VirtualScroll"]',
+                'main',
+            ]
+
+            for selector in selectors:
+                try:
+                    element = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    # Check if this element can scroll
+                    scroll_height = self.driver.execute_script("return arguments[0].scrollHeight;", element)
+                    client_height = self.driver.execute_script("return arguments[0].clientHeight;", element)
+                    if scroll_height > client_height:
+                        file_list_container = element
+                        self._log(f"Found scrollable container: {selector}")
+                        break
+                except:
+                    continue
+
+            if not file_list_container:
+                # Fallback to body
+                file_list_container = self.driver.find_element(By.TAG_NAME, 'body')
+                self._log(f"Using body as scroll container")
 
             while scroll_attempts < max_scroll_attempts:
                 checkboxes = self.driver.find_elements(
@@ -503,17 +538,24 @@ class NeatBot:
                     max_loaded = current_count
                     self._log(f"Loaded {current_count}/{total_files} checkboxes...")
 
-                # Scroll down to trigger loading more items
-                self.driver.execute_script("window.scrollBy(0, 300);")
-                time.sleep(0.5)
+                # Try scrolling the container element directly
+                # Increment scrollTop to trigger virtual scroll loading
+                self.driver.execute_script(
+                    "arguments[0].scrollTop = arguments[0].scrollTop + 500;",
+                    file_list_container
+                )
+                time.sleep(0.8)
+
                 scroll_attempts += 1
 
             if max_loaded < total_files:
                 self._log(f"⚠️  Only loaded {max_loaded}/{total_files} checkboxes after scrolling", "warning")
                 self._log(f"Will process available files only", "warning")
 
-            # Scroll back to top
-            self.driver.execute_script("window.scrollTo(0, 0);")
+            # Scroll back to top using Page Up keys
+            for _ in range(10):
+                ActionChains(self.driver).send_keys(Keys.PAGE_UP).perform()
+                time.sleep(0.1)
             time.sleep(1)
 
             # Step 3: Process each file
@@ -526,31 +568,43 @@ class NeatBot:
 
                     self._log(f"Processing file {idx}/{total_files}: {name}")
 
-                    # Find the checkbox for this file by index
-                    # Progressive scrolling to load more items in virtual scroll
+                    # Find the checkbox for this file by webid or index
+                    # Try multiple strategies
                     checkbox = None
-                    max_scroll_attempts = 10
 
-                    for scroll_attempt in range(max_scroll_attempts):
+                    # Strategy 1: Try to find by webid
+                    try:
+                        checkbox = self.driver.find_element(By.CSS_SELECTOR, f'input[id="checkbox-{webid}"]')
+                        self._log(f"Found checkbox by webid")
+                    except:
+                        pass
+
+                    # Strategy 2: Find by index if still not found
+                    if not checkbox:
+                        # Scroll slowly to the approximate position where this file should be
+                        # Each file takes roughly 80-100px of height
+                        estimated_scroll_position = (idx - 1) * 90
+
+                        # Scroll to that position
+                        self.driver.execute_script(f"window.scrollTo(0, {estimated_scroll_position});")
+                        time.sleep(1)
+
+                        # Now try to find checkbox
                         checkboxes = self.driver.find_elements(
                             By.CSS_SELECTOR,
                             'input[id^="checkbox-"]:not(#header-checkbox)'
                         )
 
-                        if idx <= len(checkboxes):
-                            checkbox = checkboxes[idx - 1]
-                            break
-
-                        # Need to scroll to load more items
-                        if scroll_attempt == 0:
-                            self._log(f"Need to scroll to find file {idx} (currently {len(checkboxes)} checkboxes loaded)")
-
-                        # Scroll down progressively
-                        self.driver.execute_script("window.scrollBy(0, 500);")
-                        time.sleep(0.5)
+                        # Look for our checkbox in the currently rendered list
+                        for cb in checkboxes:
+                            cb_id = cb.get_attribute('id')
+                            if cb_id and webid in cb_id:
+                                checkbox = cb
+                                self._log(f"Found checkbox by scrolling to position")
+                                break
 
                     if not checkbox:
-                        self._log(f"Could not find checkbox for file {idx} after {max_scroll_attempts} scroll attempts", "warning")
+                        self._log(f"Could not find checkbox for file {idx}: {name}", "warning")
                         failed_count += 1
                         errors.append(f"{file_title}: Checkbox not found")
                         continue
@@ -668,6 +722,25 @@ class NeatBot:
                         pass
 
                     self._log(f"✓ Completed file {idx}/{total_files}")
+
+                    # After every 6 files, scroll to refresh the virtual scroll
+                    # Use keyboard scrolling to trigger proper virtual scroll behavior
+                    if idx % 6 == 0 and idx < total_files:
+                        self._log(f"Scrolling to refresh file list and load next batch...")
+                        from selenium.webdriver.common.action_chains import ActionChains
+                        from selenium.webdriver.common.keys import Keys
+
+                        # Scroll down with Page Down to load more items
+                        for _ in range(5):
+                            ActionChains(self.driver).send_keys(Keys.PAGE_DOWN).perform()
+                            time.sleep(0.3)
+
+                        # Scroll back up with Page Up
+                        for _ in range(5):
+                            ActionChains(self.driver).send_keys(Keys.PAGE_UP).perform()
+                            time.sleep(0.3)
+
+                        self._log(f"✓ Scrolled to refresh view")
 
                     # Brief delay before next file
                     time.sleep(0.5)
