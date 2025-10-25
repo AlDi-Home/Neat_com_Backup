@@ -1,0 +1,416 @@
+"""
+Neat Backup Automation - GUI Application
+"""
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from pathlib import Path
+import threading
+from config import Config
+from neat_bot import NeatBot
+
+class NeatBackupGUI:
+    """Main GUI application"""
+    
+    def __init__(self):
+        self.config = Config()
+        self.bot = None
+        self.backup_thread = None
+        
+        # Main window
+        self.root = tk.Tk()
+        self.root.title("Neat Backup Automation v1.0")
+        self.root.geometry("700x720")
+        self.root.resizable(False, False)
+        
+        self.create_widgets()
+        self.load_saved_credentials()
+    
+    def create_widgets(self):
+        """Create all GUI widgets"""
+        
+        # Header
+        header_frame = tk.Frame(self.root, bg='#515EDA', height=80)
+        header_frame.pack(fill=tk.X)
+        header_frame.pack_propagate(False)
+        
+        title_label = tk.Label(
+            header_frame,
+            text="Neat Backup Automation",
+            font=('Arial', 20, 'bold'),
+            bg='#515EDA',
+            fg='white'
+        )
+        title_label.pack(pady=25)
+        
+        # Main content frame
+        content_frame = tk.Frame(self.root, padx=30, pady=20)
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Credentials section
+        creds_frame = tk.LabelFrame(content_frame, text="Neat Credentials", font=('Arial', 11, 'bold'), padx=15, pady=15)
+        creds_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(creds_frame, text="Username:", font=('Arial', 10)).grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.username_entry = tk.Entry(creds_frame, width=40, font=('Arial', 10))
+        self.username_entry.grid(row=0, column=1, pady=5, padx=(10, 0))
+        
+        tk.Label(creds_frame, text="Password:", font=('Arial', 10)).grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.password_entry = tk.Entry(creds_frame, width=40, show='●', font=('Arial', 10))
+        self.password_entry.grid(row=1, column=1, pady=5, padx=(10, 0))
+        
+        self.show_password_var = tk.BooleanVar()
+        show_password_cb = tk.Checkbutton(
+            creds_frame,
+            text="Show password",
+            variable=self.show_password_var,
+            command=self.toggle_password
+        )
+        show_password_cb.grid(row=1, column=2, padx=(10, 0))
+        
+        self.save_creds_var = tk.BooleanVar(value=True)
+        save_creds_cb = tk.Checkbutton(
+            creds_frame,
+            text="Remember credentials (encrypted)",
+            variable=self.save_creds_var
+        )
+        save_creds_cb.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
+        
+        # Settings section
+        settings_frame = tk.LabelFrame(content_frame, text="Backup Settings", font=('Arial', 11, 'bold'), padx=15, pady=15)
+        settings_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(settings_frame, text="Backup Folder:", font=('Arial', 10)).grid(row=0, column=0, sticky=tk.W, pady=5)
+        
+        folder_input_frame = tk.Frame(settings_frame)
+        folder_input_frame.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        
+        self.backup_dir_var = tk.StringVar(value=self.config.get('download_dir'))
+        backup_dir_entry = tk.Entry(folder_input_frame, textvariable=self.backup_dir_var, width=35, font=('Arial', 10))
+        backup_dir_entry.pack(side=tk.LEFT)
+        
+        browse_btn = tk.Button(folder_input_frame, text="Browse...", command=self.browse_backup_dir)
+        browse_btn.pack(side=tk.LEFT, padx=(5, 0))
+        
+        self.headless_var = tk.BooleanVar(value=self.config.get('chrome_headless', False))
+        headless_cb = tk.Checkbutton(
+            settings_frame,
+            text="Run browser in background (headless mode)",
+            variable=self.headless_var
+        )
+        headless_cb.grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+
+        self.logging_var = tk.BooleanVar(value=False)
+        logging_cb = tk.Checkbutton(
+            settings_frame,
+            text="Enable file logging (saves logs to backup folder/_logs/)",
+            variable=self.logging_var
+        )
+        logging_cb.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
+        
+        # Status section
+        status_frame = tk.LabelFrame(content_frame, text="Status", font=('Arial', 11, 'bold'), padx=15, pady=15)
+        status_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        
+        # Status log with scrollbar
+        log_scroll = tk.Scrollbar(status_frame)
+        log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.status_log = tk.Text(
+            status_frame,
+            height=12,
+            width=70,
+            font=('Courier', 9),
+            yscrollcommand=log_scroll.set,
+            state=tk.DISABLED
+        )
+        self.status_log.pack(fill=tk.BOTH, expand=True)
+        log_scroll.config(command=self.status_log.yview)
+        
+        # Progress bar
+        self.progress_var = tk.StringVar(value="Ready to start backup...")
+        progress_label = tk.Label(content_frame, textvariable=self.progress_var, font=('Arial', 10))
+        progress_label.pack(pady=(0, 5))
+        
+        self.progress_bar = ttk.Progressbar(content_frame, mode='indeterminate', length=640)
+        self.progress_bar.pack(pady=(0, 15))
+        
+        # Action buttons
+        button_frame = tk.Frame(content_frame)
+        button_frame.pack()
+
+        # Create Start button with Frame wrapper for better color control on macOS
+        start_btn_wrapper = tk.Frame(button_frame, bg='#28a745', bd=3, relief=tk.RAISED)
+        start_btn_wrapper.pack(side=tk.LEFT, padx=5)
+
+        self.start_btn = tk.Label(
+            start_btn_wrapper,
+            text="Start Backup",
+            bg='#28a745',
+            fg='white',
+            font=('Arial', 14, 'bold'),
+            width=15,
+            height=2,
+            cursor='hand2'
+        )
+        self.start_btn.pack(padx=2, pady=2)
+        self.start_btn.bind('<Button-1>', lambda e: self.start_backup())
+
+        # Stop button
+        self.stop_btn = tk.Button(
+            button_frame,
+            text="Stop",
+            command=self.stop_backup,
+            state=tk.DISABLED,
+            fg='red',
+            font=('Arial', 11, 'bold'),
+            width=15,
+            height=2
+        )
+        self.stop_btn.pack(side=tk.LEFT, padx=5)
+
+        self.retry_btn = tk.Button(
+            button_frame,
+            text="Retry Failed Files",
+            command=self.retry_failed_files,
+            state=tk.DISABLED,
+            bg='#FFA500',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            width=15,
+            height=2
+        )
+        self.retry_btn.pack(side=tk.LEFT, padx=5)
+
+        # Store button enabled state
+        self.start_btn_enabled = True
+
+    def enable_start_btn(self):
+        """Enable start button (label-based)"""
+        self.start_btn_enabled = True
+        self.start_btn.config(bg='#28a745', fg='white', cursor='hand2')
+        self.start_btn.unbind('<Button-1>')
+        self.start_btn.bind('<Button-1>', lambda e: self.start_backup())
+
+    def disable_start_btn(self):
+        """Disable start button (label-based)"""
+        self.start_btn_enabled = False
+        self.start_btn.config(bg='#cccccc', fg='#666666', cursor='')
+        self.start_btn.unbind('<Button-1>')
+
+    def toggle_password(self):
+        """Toggle password visibility"""
+        if self.show_password_var.get():
+            self.password_entry.config(show='')
+        else:
+            self.password_entry.config(show='●')
+    
+    def browse_backup_dir(self):
+        """Browse for backup directory"""
+        directory = filedialog.askdirectory(
+            initialdir=self.backup_dir_var.get(),
+            title="Select Backup Directory"
+        )
+        if directory:
+            self.backup_dir_var.set(directory)
+    
+    def load_saved_credentials(self):
+        """Load saved credentials if available"""
+        creds = self.config.load_credentials()
+        if creds:
+            self.username_entry.insert(0, creds[0])
+            self.password_entry.insert(0, creds[1])
+            self.log_status("Loaded saved credentials", "info")
+    
+    def log_status(self, message: str, level: str = 'info'):
+        """Add message to status log"""
+        self.status_log.config(state=tk.NORMAL)
+        
+        # Color coding
+        tag = level
+        if level == 'error':
+            color = 'red'
+        elif level == 'success':
+            color = 'green'
+        elif level == 'warning':
+            color = 'orange'
+        else:
+            color = 'black'
+        
+        self.status_log.tag_config(tag, foreground=color)
+        self.status_log.insert(tk.END, f"{message}\n", tag)
+        self.status_log.see(tk.END)
+        self.status_log.config(state=tk.DISABLED)
+    
+    def start_backup(self):
+        """Start backup process"""
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+        
+        if not username or not password:
+            messagebox.showerror("Error", "Please enter username and password")
+            return
+        
+        # Save credentials if requested
+        if self.save_creds_var.get():
+            self.config.save_credentials(username, password)
+            self.log_status("Credentials saved (encrypted)", "success")
+        
+        # Update config
+        self.config.set('download_dir', self.backup_dir_var.get())
+        self.config.set('chrome_headless', self.headless_var.get())
+        self.config.set('enable_logging', self.logging_var.get())
+
+        # Validate configuration
+        is_valid, validation_errors = self.config.validate()
+        if not is_valid:
+            error_msg = "Configuration validation failed:\n\n" + "\n".join(validation_errors)
+            messagebox.showerror("Configuration Error", error_msg)
+            return
+
+        # Create backup directory
+        Path(self.backup_dir_var.get()).mkdir(parents=True, exist_ok=True)
+        
+        # Disable start button, enable stop
+        self.disable_start_btn()
+        self.stop_btn.config(state=tk.NORMAL)
+        
+        # Start progress bar
+        self.progress_bar.start()
+        self.progress_var.set("Backup in progress...")
+        
+        # Clear log
+        self.status_log.config(state=tk.NORMAL)
+        self.status_log.delete(1.0, tk.END)
+        self.status_log.config(state=tk.DISABLED)
+        
+        # Run backup in thread
+        self.backup_thread = threading.Thread(
+            target=self.run_backup_thread,
+            args=(username, password),
+            daemon=True
+        )
+        self.backup_thread.start()
+    
+    def run_backup_thread(self, username: str, password: str):
+        """Run backup in background thread"""
+        try:
+            self.bot = NeatBot(self.config, status_callback=self.log_status)
+            stats = self.bot.run_backup(username, password)
+            
+            # Show results
+            self.root.after(0, lambda: self.backup_complete(stats))
+            
+        except Exception as e:
+            self.root.after(0, lambda: self.log_status(f"Backup failed: {str(e)}", "error"))
+            self.root.after(0, self.backup_complete, {'success': False})
+    
+    def backup_complete(self, stats: dict):
+        """Handle backup completion"""
+        self.progress_bar.stop()
+        self.enable_start_btn()
+        self.stop_btn.config(state=tk.DISABLED)
+
+        if stats.get('success'):
+            successful = stats.get('successful_files', stats.get('total_files', 0))
+            failed = stats.get('failed_files', 0)
+            total = stats.get('total_files', 0)
+            folders = stats.get('total_folders', 0)
+
+            # Enable retry button if there are failures
+            if failed > 0:
+                self.retry_btn.config(state=tk.NORMAL)
+            else:
+                self.retry_btn.config(state=tk.DISABLED)
+
+            # Build message based on success/failure
+            if failed > 0:
+                self.progress_var.set(f"Backup complete with errors: {successful}/{total} files succeeded")
+                error_details = "\n\nFailed files:\n" + "\n".join(stats.get('errors', [])[:5])
+                if len(stats.get('errors', [])) > 5:
+                    error_details += f"\n... and {len(stats['errors']) - 5} more errors"
+
+                messagebox.showwarning(
+                    "Backup Complete with Errors",
+                    f"Backup completed with some failures.\n\n"
+                    f"Successfully exported: {successful}/{total} files\n"
+                    f"Failed: {failed} files\n"
+                    f"Folders processed: {folders}\n"
+                    f"Location: {self.backup_dir_var.get()}"
+                    f"{error_details}"
+                )
+            else:
+                self.progress_var.set(f"Backup complete! {successful} files from {folders} folders")
+                messagebox.showinfo(
+                    "Backup Complete",
+                    f"Successfully exported {successful} files from {folders} folders!\n\n"
+                    f"Location: {self.backup_dir_var.get()}"
+                )
+        else:
+            self.progress_var.set("Backup failed - check log for details")
+            messagebox.showerror("Backup Failed", "Backup process failed. Check the status log for details.")
+    
+    def retry_failed_files(self):
+        """Retry previously failed files"""
+        if not self.bot or not self.bot.failed_files:
+            messagebox.showinfo("No Failed Files", "There are no failed files to retry.")
+            return
+
+        # Get credentials
+        username = self.username_entry.get().strip()
+        password = self.password_entry.get().strip()
+
+        if not username or not password:
+            messagebox.showerror("Error", "Please enter username and password")
+            return
+
+        # Disable buttons
+        self.disable_start_btn()
+        self.retry_btn.config(state=tk.DISABLED)
+        self.stop_btn.config(state=tk.NORMAL)
+
+        # Start progress bar
+        self.progress_bar.start()
+        self.progress_var.set("Retrying failed files...")
+
+        # Log retry start
+        self.log_status(f"Starting retry for {len(self.bot.failed_files)} failed files", "info")
+
+        # Run retry in thread
+        retry_thread = threading.Thread(
+            target=self.run_retry_thread,
+            args=(username, password),
+            daemon=True
+        )
+        retry_thread.start()
+
+    def run_retry_thread(self, username: str, password: str):
+        """Run retry in background thread"""
+        try:
+            stats = self.bot.retry_failed_files(username, password)
+
+            # Show results
+            self.root.after(0, lambda: self.backup_complete(stats))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.log_status(f"Retry failed: {str(e)}", "error"))
+            self.root.after(0, self.backup_complete, {'success': False})
+
+    def stop_backup(self):
+        """Stop backup process"""
+        if self.bot:
+            self.bot.cleanup()
+
+        self.progress_bar.stop()
+        self.enable_start_btn()
+        self.stop_btn.config(state=tk.DISABLED)
+        self.retry_btn.config(state=tk.DISABLED)
+        self.progress_var.set("Backup stopped by user")
+        self.log_status("Backup stopped by user", "warning")
+
+    def run(self):
+        """Start the GUI application"""
+        self.root.mainloop()
+
+if __name__ == "__main__":
+    app = NeatBackupGUI()
+    app.run()
