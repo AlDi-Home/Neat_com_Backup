@@ -70,21 +70,32 @@ def organize_file(source_path: str, folder_name: str, backup_root: str) -> Optio
 
 def sanitize_folder_name(name: str) -> str:
     """
-    Sanitize folder name for filesystem compatibility
-    
+    Sanitize folder name/path for filesystem compatibility
+
+    Handles paths with slashes by sanitizing each component separately
+    to preserve folder hierarchy.
+
     Args:
-        name: Original folder name
-    
+        name: Original folder name or path (e.g., "2013 year TAX/Receipts")
+
     Returns:
-        Safe folder name
+        Safe folder name or path (e.g., "2013 year TAX/Receipts")
     """
-    # Remove/replace problematic characters
-    unsafe_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
-    safe_name = name
-    for char in unsafe_chars:
-        safe_name = safe_name.replace(char, '_')
-    
-    return safe_name.strip()
+    # Split by forward slash to preserve folder hierarchy
+    path_parts = name.split('/')
+
+    # Sanitize each part separately
+    unsafe_chars = ['<', '>', ':', '"', '\\', '|', '?', '*']
+    sanitized_parts = []
+
+    for part in path_parts:
+        safe_part = part
+        for char in unsafe_chars:
+            safe_part = safe_part.replace(char, '_')
+        sanitized_parts.append(safe_part.strip())
+
+    # Rejoin with forward slash
+    return '/'.join(sanitized_parts)
 
 def get_chrome_download_dir() -> str:
     """

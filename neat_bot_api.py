@@ -20,7 +20,7 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from utils import sanitize_folder_name
 
-class NeatBot:
+class NeatBotAPI:
     """Enhanced Neat.com backup bot using API downloads"""
 
     def __init__(self, config, status_callback: Optional[Callable] = None):
@@ -29,7 +29,6 @@ class NeatBot:
         self.driver = None
         self.session = None  # requests session for API downloads
         self.wait = None
-        self.failed_files = []  # Track failed files for retry functionality
 
     def _log(self, message: str, level: str = 'info'):
         """Log message"""
@@ -479,16 +478,12 @@ class NeatBot:
 
     def run_backup(self, username: str, password: str) -> dict:
         """Run complete backup with recursive subfolder support"""
-        # Clear failed files list from any previous run
-        self.failed_files = []
-
         stats = {
             'total_folders': 0,
             'total_files': 0,
             'successful_files': 0,
             'failed_files': 0,
             'errors': [],
-            'failed_file_details': [],
             'success': False
         }
 
@@ -513,15 +508,7 @@ class NeatBot:
                 stats['total_files'] += (success_count + fail_count)
                 stats['errors'].extend(folder_errors)
 
-                # Track failed files for retry
-                for error in folder_errors:
-                    self.failed_files.append({
-                        'folder': folder_name,
-                        'error': error
-                    })
-
             stats['success'] = True
-            stats['failed_file_details'] = self.failed_files
 
             if stats['failed_files'] > 0:
                 self._log(
@@ -541,22 +528,6 @@ class NeatBot:
         finally:
             if self.driver:
                 self.driver.quit()
-
-        return stats
-
-    def retry_failed_files(self, username: str, password: str) -> dict:
-        """
-        Retry downloading failed files
-
-        Note: With the new API-based approach, retrying individual files is less relevant
-        since failures are usually due to missing download_url or network issues.
-        This method re-runs the full backup to maintain compatibility with the GUI.
-        """
-        self._log(f"Retrying {len(self.failed_files)} failed files...", "info")
-
-        # For API-based downloads, the best retry strategy is to re-run the full backup
-        # since file-level failures are rare and usually indicate larger issues
-        stats = self.run_backup(username, password)
 
         return stats
 
