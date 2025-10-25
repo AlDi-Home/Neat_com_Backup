@@ -1,204 +1,117 @@
 # Quick Start Guide - Neat Backup Automation
 
-## **IMMEDIATE NEXT STEPS**
+Get up and running in 5 minutes!
 
-### **Step 1: Download the Project**
+## Prerequisites
 
-The complete project is ready in your outputs folder. Download it to your Mac.
+- Python 3.8 or higher
+- Chrome browser installed
+- Neat.com account credentials
 
-### **Step 2: Install Dependencies**
+## Installation Steps
 
-Open Terminal and run:
+### 1. Install Dependencies
+
+Open Terminal and navigate to the project folder:
 
 ```bash
-cd ~/Downloads/NeatBackupAutomation
+cd /Users/alex/Projects/Neat
 pip3 install -r requirements.txt
 ```
 
-If you don't have pip3:
+If you don't have pip3 installed:
+
 ```bash
-# Install Homebrew first (if needed)
+# Install Homebrew (if needed)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
 # Install Python
 brew install python
 ```
 
-### **Step 3: Run the Application**
+### 2. Launch the Application
 
 ```bash
 python3 main.py
 ```
 
-The GUI will open automatically!
+The GUI window will open automatically.
+
+## First Time Setup
+
+### Step 1: Enter Credentials
+
+1. Enter your Neat.com username (email)
+2. Enter your password
+3. Check "Show password" to verify it's correct
+4. Check "Remember credentials" to save them securely
+
+### Step 2: Configure Backup Settings
+
+1. **Backup Folder**: Default is `/Users/alex/Downloads/Neat`
+   - Click "Browse..." to change location
+
+2. **Run browser in background**: Unchecked by default
+   - Check this for faster backups (no browser window)
+
+3. **Enable file logging**: Unchecked by default
+   - Check this to save detailed logs to `backup_folder/_logs/`
+   - Useful for troubleshooting
+
+### Step 3: Start Backup
+
+Click the green **"Start Backup"** button!
+
+## What Happens Next
+
+1. **Browser opens** (unless headless mode is enabled)
+2. **Logs into Neat.com** with your credentials
+3. **Discovers folders** (shows "Found 19 top-level folders")
+4. **For each folder**:
+   - Opens the folder
+   - Sets pagination to 100 items
+   - Downloads all files (skips existing files)
+   - Processes subfolders recursively
+5. **Completion message** shows total files downloaded
+
+## Progress Monitoring
+
+Watch the **Status** section for real-time updates.
+
+## Expected Results
+
+After completion, your files will be organized with proper folder hierarchy.
+
+## Smart Features
+
+### Automatic Deduplication
+
+The tool automatically skips files you already have:
+
+- **Same filename, same size** → Skipped
+- **Same filename, different size** → Downloads as `filename_1.pdf`
+- **New file** → Downloads normally
+
+### Resume Capability
+
+If backup is interrupted, just click "Start Backup" again - already downloaded files are automatically skipped.
+
+## Typical Timeline
+
+- **Small library** (100 files): ~5-10 minutes
+- **Medium library** (500 files): ~20-30 minutes
+- **Large library** (1000+ files): ~1-2 hours
+
+## Tips for Best Results
+
+1. **First backup**: Disable headless mode to watch the process
+2. **Subsequent backups**: Enable headless mode for speed
+3. **Enable logging** when troubleshooting issues
+4. **Disable sleep mode** for large backups
+5. **Use wired connection** for faster/stable downloads
 
 ---
 
-## **CRITICAL: PDF Dropdown Selector**
+**Ready to start?** Just run `python3 main.py` and click the green button!
 
-⚠️ **One piece needs your input** - the PDF export dropdown selector.
-
-When you first run the app, it will work EXCEPT for clicking the PDF option in the dropdown.
-
-### **How to Fix (2 minutes):**
-
-1. **Run the app once** - it will select a file and click Export
-2. **The dropdown will appear but won't auto-click PDF**
-3. **While dropdown is open:**
-   - Right-click on "PDF" or "Data as PDF" option
-   - Click "Inspect Element"
-   - In DevTools, right-click the highlighted element
-   - Copy → Copy selector or Copy XPath
-4. **Paste the selector into `neat_bot.py` line 156**
-
-### **Example Fix:**
-
-```python
-# Find this section in neat_bot.py (around line 156):
-
-# TODO: Click PDF option in dropdown
-try:
-    # PASTE YOUR SELECTOR HERE:
-    pdf_option = self.driver.find_element(By.CSS_SELECTOR, 'YOUR_SELECTOR_HERE')
-    # Or if you copied XPath:
-    # pdf_option = self.driver.find_element(By.XPATH, 'YOUR_XPATH_HERE')
-    
-    pdf_option.click()
-except:
-    pass
-```
-
----
-
-## **Testing the App**
-
-### **Test Run (Recommended):**
-
-1. Start the app
-2. Enter credentials
-3. Check "Show password" to verify
-4. Click "Start Backup"
-5. **Watch the browser** - it will:
-   - Login to Neat
-   - Navigate to folders
-   - Select first file
-   - Click Export
-   - **PAUSE at dropdown** ← This is where you get the selector
-
-### **After Fixing Dropdown:**
-
-Run again - it should complete fully and export all files!
-
----
-
-## **Expected Behavior**
-
-✅ **Browser opens** (unless headless mode)  
-✅ **Logs into Neat.com**  
-✅ **Lists all folders**  
-✅ **Exports files one by one**  
-✅ **Organizes into backup/FolderName/ structure**  
-✅ **Shows progress in GUI**  
-
-**Time estimate:** ~10-20 seconds per file = 2-4 hours for 500-1,250 files
-
----
-
-## **Folder Structure After Backup**
-
-```
-~/NeatBackup/
-├── 2013 year TAX/
-│   └── Receipts/
-│       └── files.pdf
-├── 2014 year TAX/
-│   └── files.pdf
-├── 2024 year TAX/
-│   ├── Notice of assessment Sveta 2024 - Health.pdf
-│   ├── Viktor_cra_2024 - Money.pdf
-│   └── Alexander_cra_2024 - Money.pdf
-├── Business/
-│   └── files.pdf
-└── Home/
-    └── files.pdf
-```
-
----
-
-## **Troubleshooting**
-
-### **Error: "ChromeDriver not compatible"**
-
-```bash
-pip3 install --upgrade webdriver-manager
-```
-
-### **Error: "Login failed"**
-
-- Verify credentials
-- Check if Neat.com is accessible
-- Try logging in manually first
-
-### **Files Not Downloading**
-
-- Check Chrome settings: `chrome://settings/downloads`
-- Disable "Ask where to save each file before downloading"
-
-### **Permission Denied on ~/NeatBackup**
-
-```bash
-mkdir -p ~/NeatBackup
-chmod 755 ~/NeatBackup
-```
-
----
-
-## **Performance Tips**
-
-**Speed up the backup:**
-1. Enable "Run browser in background" (headless mode)
-2. Reduce delay in `config.json`:
-   ```json
-   {
-     "delay_between_files": 0.5
-   }
-   ```
-
-**Monitor progress:**
-- Status log shows real-time updates
-- Progress bar indicates activity
-- File counts displayed at completion
-
----
-
-## **What Happens Next**
-
-Once you fix the PDF dropdown selector:
-
-1. **Run the app**
-2. **Click "Start Backup"**
-3. **Go get coffee** ☕
-4. **Come back to completed backup** ✅
-
-The app handles:
-- Navigating all folders
-- Exporting all files
-- Organizing everything
-- Handling errors gracefully
-
----
-
-## **Need Help?**
-
-1. Check `README.md` for detailed documentation
-2. Look at status log for specific errors
-3. Verify Chrome/ChromeDriver compatibility
-4. Test with one folder first
-
----
-
-## **You're 99% Done!**
-
-Just need that ONE dropdown selector and you're golden. The entire automation is ready to run.
-
-**Questions? Issues? Just ask!**
+**Questions?** Check README.md for detailed documentation.

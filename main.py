@@ -98,6 +98,14 @@ class NeatBackupGUI:
             variable=self.headless_var
         )
         headless_cb.grid(row=1, column=1, sticky=tk.W, pady=(5, 0))
+
+        self.logging_var = tk.BooleanVar(value=False)
+        logging_cb = tk.Checkbutton(
+            settings_frame,
+            text="Enable file logging (saves logs to backup folder/_logs/)",
+            variable=self.logging_var
+        )
+        logging_cb.grid(row=2, column=1, sticky=tk.W, pady=(5, 0))
         
         # Status section
         status_frame = tk.LabelFrame(content_frame, text="Status", font=('Arial', 11, 'bold'), padx=15, pady=15)
@@ -129,25 +137,32 @@ class NeatBackupGUI:
         # Action buttons
         button_frame = tk.Frame(content_frame)
         button_frame.pack()
-        
-        self.start_btn = tk.Button(
-            button_frame,
+
+        # Create Start button with Frame wrapper for better color control on macOS
+        start_btn_wrapper = tk.Frame(button_frame, bg='#28a745', bd=3, relief=tk.RAISED)
+        start_btn_wrapper.pack(side=tk.LEFT, padx=5)
+
+        self.start_btn = tk.Label(
+            start_btn_wrapper,
             text="Start Backup",
-            command=self.start_backup,
-            bg='#515EDA',
+            bg='#28a745',
             fg='white',
-            font=('Arial', 11, 'bold'),
+            font=('Arial', 14, 'bold'),
             width=15,
-            height=2
+            height=2,
+            cursor='hand2'
         )
-        self.start_btn.pack(side=tk.LEFT, padx=5)
-        
+        self.start_btn.pack(padx=2, pady=2)
+        self.start_btn.bind('<Button-1>', lambda e: self.start_backup())
+
+        # Stop button
         self.stop_btn = tk.Button(
             button_frame,
             text="Stop",
             command=self.stop_backup,
             state=tk.DISABLED,
-            font=('Arial', 11),
+            fg='red',
+            font=('Arial', 11, 'bold'),
             width=15,
             height=2
         )
@@ -165,7 +180,23 @@ class NeatBackupGUI:
             height=2
         )
         self.retry_btn.pack(side=tk.LEFT, padx=5)
-    
+
+        # Store button enabled state
+        self.start_btn_enabled = True
+
+    def enable_start_btn(self):
+        """Enable start button (label-based)"""
+        self.start_btn_enabled = True
+        self.start_btn.config(bg='#28a745', fg='white', cursor='hand2')
+        self.start_btn.unbind('<Button-1>')
+        self.start_btn.bind('<Button-1>', lambda e: self.start_backup())
+
+    def disable_start_btn(self):
+        """Disable start button (label-based)"""
+        self.start_btn_enabled = False
+        self.start_btn.config(bg='#cccccc', fg='#666666', cursor='')
+        self.start_btn.unbind('<Button-1>')
+
     def toggle_password(self):
         """Toggle password visibility"""
         if self.show_password_var.get():
@@ -227,6 +258,7 @@ class NeatBackupGUI:
         # Update config
         self.config.set('download_dir', self.backup_dir_var.get())
         self.config.set('chrome_headless', self.headless_var.get())
+        self.config.set('enable_logging', self.logging_var.get())
 
         # Validate configuration
         is_valid, validation_errors = self.config.validate()
@@ -239,7 +271,7 @@ class NeatBackupGUI:
         Path(self.backup_dir_var.get()).mkdir(parents=True, exist_ok=True)
         
         # Disable start button, enable stop
-        self.start_btn.config(state=tk.DISABLED)
+        self.disable_start_btn()
         self.stop_btn.config(state=tk.NORMAL)
         
         # Start progress bar
@@ -275,7 +307,7 @@ class NeatBackupGUI:
     def backup_complete(self, stats: dict):
         """Handle backup completion"""
         self.progress_bar.stop()
-        self.start_btn.config(state=tk.NORMAL)
+        self.enable_start_btn()
         self.stop_btn.config(state=tk.DISABLED)
 
         if stats.get('success'):
@@ -332,7 +364,7 @@ class NeatBackupGUI:
             return
 
         # Disable buttons
-        self.start_btn.config(state=tk.DISABLED)
+        self.disable_start_btn()
         self.retry_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
 
@@ -369,7 +401,7 @@ class NeatBackupGUI:
             self.bot.cleanup()
 
         self.progress_bar.stop()
-        self.start_btn.config(state=tk.NORMAL)
+        self.enable_start_btn()
         self.stop_btn.config(state=tk.DISABLED)
         self.retry_btn.config(state=tk.DISABLED)
         self.progress_var.set("Backup stopped by user")

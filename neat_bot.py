@@ -31,9 +31,53 @@ class NeatBot:
         self.wait = None
         self.failed_files = []  # Track failed files for retry functionality
 
+        # Setup file logging
+        self.log_file = None
+        self._setup_logging()
+
+    def _setup_logging(self):
+        """Setup file logging in download folder"""
+        # Check if logging is enabled
+        if not self.config.get('enable_logging', False):
+            self.log_file = None
+            return
+
+        try:
+            import datetime
+
+            # Create logs folder in download directory
+            download_dir = Path(self.config.get('download_dir'))
+            log_dir = download_dir / "_logs"
+            log_dir.mkdir(exist_ok=True)
+
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = log_dir / f"neat_backup_{timestamp}.log"
+
+            self.log_file = open(log_filename, 'w', encoding='utf-8')
+            print(f"[INFO] Logging to: {log_filename}")
+        except Exception as e:
+            print(f"[WARNING] Could not setup file logging: {e}")
+            self.log_file = None
+
     def _log(self, message: str, level: str = 'info'):
-        """Log message"""
+        """Log message to console, file, and callback"""
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        log_message = f"[{timestamp}] [{level.upper()}] {message}"
+
+        # Console output
         print(f"[{level.upper()}] {message}")
+
+        # File output
+        if self.log_file:
+            try:
+                self.log_file.write(log_message + "\n")
+                self.log_file.flush()  # Ensure immediate write
+            except:
+                pass
+
+        # Callback (for GUI)
         if self.status_callback:
             self.status_callback(message, level)
 
@@ -357,29 +401,70 @@ class NeatBot:
                             errors.append(f"{full_path}/{file_title}: No download URL")
                             continue
 
-                        # Download via API
+                        # Create folder structure
+                        folder_dir = Path(backup_root) / safe_folder_path
+                        folder_dir.mkdir(parents=True, exist_ok=True)
+
+                        # Prepare filename
+                        safe_name = f"{name} - {description}".replace('/', '-').replace('\\', '-')
+                        output_file = folder_dir / f"{safe_name}.pdf"
+
+                        # Get remote file size via streaming GET request (HEAD doesn't work with signed URLs)
+                        try:
+                            size_response = self.session.get(download_url, allow_redirects=True, timeout=30, stream=True)
+                            remote_size = int(size_response.headers.get('Content-Length', 0))
+                            size_response.close()  # Close without downloading full content
+                        except:
+                            # If size check fails, we'll download without size verification
+                            remote_size = 0
+
+                        # Check if file with same name already exists
+                        if output_file.exists():
+                            existing_size = output_file.stat().st_size
+
+                            # Compare sizes
+                            if remote_size > 0 and existing_size == remote_size:
+                                self._log(f"⊙ Already exists ({existing_size:,} bytes), same size, skipping", "info")
+                                exported_count += 1
+                                continue
+                            elif remote_size > 0 and existing_size != remote_size:
+                                # Same name but different size - find available numbered suffix
+                                self._log(f"⊙ File exists but different size (local: {existing_size:,}, remote: {remote_size:,})", "info")
+                                counter = 1
+                                while True:
+                                    numbered_file = folder_dir / f"{safe_name}_{counter}.pdf"
+                                    if not numbered_file.exists():
+                                        output_file = numbered_file
+                                        self._log(f"  Downloading as _{counter}")
+                                        break
+                                    else:
+                                        # Check if this numbered file matches
+                                        numbered_size = numbered_file.stat().st_size
+                                        if numbered_size == remote_size:
+                                            self._log(f"⊙ Already exists as _{counter} ({numbered_size:,} bytes), same size, skipping", "info")
+                                            exported_count += 1
+                                            output_file = None  # Signal to skip download
+                                            break
+                                    counter += 1
+
+                                if output_file is None:
+                                    continue  # Skip download
+                            else:
+                                # Can't determine remote size, skip to be safe
+                                self._log(f"⊙ Already exists ({existing_size:,} bytes), skipping (can't verify size)", "info")
+                                exported_count += 1
+                                continue
+
+                        # Download the file
                         response = self.session.get(download_url, allow_redirects=True, timeout=60)
 
                         if response.status_code == 200:
-                            # Create folder structure
-                            folder_dir = Path(backup_root) / safe_folder_path
-                            folder_dir.mkdir(parents=True, exist_ok=True)
-
                             # Save file
-                            safe_name = f"{name} - {description}".replace('/', '-').replace('\\', '-')
-                            output_file = folder_dir / f"{safe_name}.pdf"
-
-                            # Handle duplicates
-                            counter = 1
-                            while output_file.exists():
-                                output_file = folder_dir / f"{safe_name}_{counter}.pdf"
-                                counter += 1
-
                             with open(output_file, 'wb') as f:
                                 f.write(response.content)
 
                             file_size = output_file.stat().st_size
-                            self._log(f"✓ Saved ({file_size:,} bytes)", "success")
+                            self._log(f"✓ Downloaded ({file_size:,} bytes)", "success")
                             exported_count += 1
 
                         else:
@@ -541,6 +626,9 @@ class NeatBot:
         finally:
             if self.driver:
                 self.driver.quit()
+            if self.log_file:
+                self.log_file.close()
+                print("[INFO] Log file closed")
 
         return stats
 
@@ -561,7 +649,10 @@ class NeatBot:
         return stats
 
     def cleanup(self):
-        """Close browser"""
+        """Close browser and log file"""
         if self.driver:
             self.driver.quit()
             self._log("Browser closed")
+        if self.log_file:
+            self.log_file.close()
+            print("[INFO] Log file closed")
