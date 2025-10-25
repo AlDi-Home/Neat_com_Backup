@@ -16,20 +16,32 @@ A comprehensive backup tool for Neat.com that automatically downloads all your d
 
 ## Quick Start
 
-### 1. Install Dependencies
+### Option 1: Double-Click Launcher (Easiest) 🍎
+
+1. **Double-click**: `Neat Backup.command` in the project folder
+2. **Configure**: Enter credentials and settings
+3. **Click**: "Start Backup"
+
+Or double-click `dist/Neat Backup.app` if you've built it.
+
+### Option 2: Run from Terminal
+
+If you prefer running from terminal or are developing:
+
+**1. Install Dependencies**
 
 ```bash
 cd /Users/alex/Projects/Neat
 pip3 install -r requirements.txt
 ```
 
-### 2. Run the Application
+**2. Run the Application**
 
 ```bash
 python3 main.py
 ```
 
-### 3. Configure and Start
+**3. Configure and Start**
 
 1. Enter your Neat.com credentials
 2. Select backup folder (default: `~/Downloads/Neat`)
@@ -215,6 +227,29 @@ The tool intercepts responses from:
 - Stored in `~/.neat_credentials.enc`
 - API session uses browser cookies (same security as manual login)
 - No credentials stored in plain text
+
+## Building the macOS App
+
+The project includes:
+- `Neat Backup.command` - Simple launcher script (just double-click)
+- `dist/Neat Backup.app` - Optional .app bundle
+
+### Building the .app
+
+**Alias Mode (Recommended - 228KB):**
+```bash
+pip3 install py2app
+python3 setup.py py2app -A
+```
+
+The .app will be created in `dist/Neat Backup.app`. Alias mode creates a lightweight app that links to your Python installation and project files.
+
+**Standalone Mode (113MB, has code signing issues):**
+```bash
+python3 setup.py py2app
+```
+
+Creates a fully self-contained app, but may fail due to macOS code signing requirements.
 
 ## Contributing
 
