@@ -15,7 +15,7 @@ Get up and running in 5 minutes!
 Open Terminal and navigate to the project folder:
 
 ```bash
-cd /Users/alex/Projects/Neat
+cd path/to/neat-backup-automation
 pip3 install -r requirements.txt
 ```
 
@@ -48,7 +48,7 @@ The GUI window will open automatically.
 
 ### Step 2: Configure Backup Settings
 
-1. **Backup Folder**: Default is `/Users/alex/Downloads/Neat`
+1. **Backup Folder**: Default is `~/Downloads/Neat`
    - Click "Browse..." to change location
 
 2. **Run browser in background**: Unchecked by default

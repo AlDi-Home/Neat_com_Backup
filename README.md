@@ -2,6 +2,8 @@
 
 A comprehensive backup tool for Neat.com that automatically downloads all your documents and organizes them into folders on your local machine.
 
+> **Platform Compatibility**: Developed and tested on **macOS**. Should work on Windows and Linux with minor adjustments (paths, launcher scripts). Chrome browser required on all platforms.
+
 ## Features
 
 ✅ **API-Based Downloads** - Direct file downloads bypassing UI limitations (100% success rate)
@@ -13,25 +15,24 @@ A comprehensive backup tool for Neat.com that automatically downloads all your d
 ✅ **User-Friendly GUI** - Easy to use graphical interface
 ✅ **Encrypted Credentials** - Securely stores your Neat.com login
 ✅ **Headless Mode** - Run browser in background for faster backups
+✅ **Cross-Platform** - Works on macOS, Windows, and Linux
 
 ## Quick Start
 
-### Option 1: Double-Click Launcher (Easiest) 🍎
+### Option 1: Double-Click Launcher (macOS) 🍎
 
 1. **Double-click**: `Neat Backup.command` in the project folder
 2. **Configure**: Enter credentials and settings
 3. **Click**: "Start Backup"
 
-Or double-click `dist/Neat Backup.app` if you've built it.
+Or double-click `dist/Neat Backup.app` if you've built it (macOS only).
 
-### Option 2: Run from Terminal
-
-If you prefer running from terminal or are developing:
+### Option 2: Run from Terminal (All Platforms)
 
 **1. Install Dependencies**
 
 ```bash
-cd /Users/alex/Projects/Neat
+cd path/to/neat-backup-automation
 pip3 install -r requirements.txt
 ```
 
@@ -113,12 +114,14 @@ Edit `config.json` for advanced settings:
 
 ```json
 {
-  "download_dir": "/Users/alex/Downloads/Neat",
+  "download_dir": "~/Downloads/Neat",
   "chrome_headless": false,
   "enable_logging": false,
   "wait_timeout": 10
 }
 ```
+
+**Note**: Paths use `~` notation which works on all platforms (macOS, Linux, Windows).
 
 ## Performance
 
@@ -173,15 +176,18 @@ Logs include:
 ## Project Structure
 
 ```
-/Users/alex/Projects/Neat/
-├── main.py                 # GUI application
-├── neat_bot.py            # Core backup logic (API-based)
-├── config.py              # Configuration management
-├── utils.py               # Utility functions
-├── requirements.txt       # Python dependencies
-├── README.md             # This file
-├── QUICKSTART.md         # Quick start guide
-└── _archive/             # Old test files and docs
+neat-backup-automation/
+├── main.py                   # GUI application
+├── neat_bot.py              # Core backup logic (API-based)
+├── config.py                # Configuration management
+├── utils.py                 # Utility functions
+├── requirements.txt         # Python dependencies
+├── setup.py                 # macOS app build configuration
+├── Neat Backup.command      # macOS launcher script
+├── README.md                # This file
+├── QUICKSTART.md            # Quick start guide
+├── CLEANUP_SUMMARY.md       # Project cleanup log
+└── _archive/                # Old test files and docs
 ```
 
 ## Version History
@@ -251,23 +257,47 @@ python3 setup.py py2app
 
 Creates a fully self-contained app, but may fail due to macOS code signing requirements.
 
+## Platform Notes
+
+### macOS
+- **Tested**: macOS Ventura 13.x
+- **Launcher**: Double-click `Neat Backup.command` or `dist/Neat Backup.app`
+- **Chrome**: Automatically managed by webdriver-manager
+
+### Windows
+- **Status**: Should work, not tested
+- **Launcher**: Create a `.bat` file: `python main.py`
+- **Chrome**: Must be installed, path auto-detected
+
+### Linux
+- **Status**: Should work, not tested
+- **Launcher**: Create a `.sh` file: `#!/bin/bash\npython3 main.py`
+- **Chrome**: Must be installed (`chromium` or `google-chrome`)
+
 ## Contributing
 
-This is a personal backup tool. Feel free to fork and modify for your needs.
+Contributions welcome! Feel free to:
+- Report bugs via GitHub Issues
+- Submit pull requests
+- Fork and modify for your needs
 
 ## License
 
-Personal use only.
+MIT License - Feel free to use and modify.
 
 ## Support
 
-For issues or questions, check:
-1. Log files (if enabled)
-2. This README
-3. QUICKSTART.md for step-by-step guide
+For issues or questions:
+1. Check log files (if logging is enabled)
+2. Review this README and QUICKSTART.md
+3. Open an issue on GitHub
+
+## Disclaimer
+
+This is an unofficial tool and is not affiliated with or endorsed by Neat.com. Use at your own risk.
 
 ---
 
-**Last Updated**: October 25, 2025
 **Version**: 2.0
-**Author**: Alex
+**Platform**: Cross-platform (Python 3.8+)
+**Tested on**: macOS Ventura 13.x
