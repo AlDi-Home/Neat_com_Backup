@@ -86,6 +86,9 @@ class NeatBot:
         chrome_options = Options()
         chrome_options.set_capability('goog:loggingPrefs', {'performance': 'ALL'})
 
+        # Disable MacAppCodeSignClone to prevent Chrome from creating code_sign_clone folders
+        chrome_options.add_argument('--disable-features=MacAppCodeSignClone')
+
         if self.config.get('chrome_headless', False):
             chrome_options.add_argument('--headless=new')
 
