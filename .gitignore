@@ -62,6 +62,7 @@ _archive/
 .claude/
 .specify/
 .venv/
+specs/
 *.spec
 
 # Development and test files
