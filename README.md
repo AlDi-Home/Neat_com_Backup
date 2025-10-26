@@ -185,9 +185,7 @@ neat-backup-automation/
 ├── setup.py                 # macOS app build configuration
 ├── Neat Backup.command      # macOS launcher script
 ├── README.md                # This file
-├── QUICKSTART.md            # Quick start guide
-├── CLEANUP_SUMMARY.md       # Project cleanup log
-└── _archive/                # Old test files and docs
+└── QUICKSTART.md            # Quick start guide
 ```
 
 ## Version History
