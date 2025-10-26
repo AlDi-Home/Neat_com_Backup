@@ -56,3 +56,17 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+
+# Private/Personal directories and files
+_archive/
+.claude/
+.specify/
+.venv/
+*.spec
+
+# Development and test files
+test_*.py
+analyze_*.py
+debug_*.py
+capture_*.py
+package-lock.json
